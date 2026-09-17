@@ -54,10 +54,12 @@ def segment_line_intervals(
     hpp: np.ndarray,
     min_line_height: int = 10,
     min_gap: int = 4,
+    min_peak_distance: int = 0,
 ) -> List[Tuple[int, int]]:
     """
     Detect vertical start and end row indices for individual text lines using HPP.
     Combines peak-valley analysis for dense/lined handwriting with thresholding fallback.
+    Prevents intra-line splitting (ascenders vs x-height) and merges thin sub-line fragments.
     """
     height = len(hpp)
     if height == 0:
@@ -71,7 +73,8 @@ def segment_line_intervals(
     # Attempt peak detection if there is sufficient dynamic range
     if dynamic_range > 8.0:
         prominence = max(4.0, dynamic_range * 0.06)
-        peaks, _ = find_peaks(hpp, distance=15, prominence=prominence)
+        peak_dist = min_peak_distance if min_peak_distance > 0 else max(28, int(height * 0.030))
+        peaks, _ = find_peaks(hpp, distance=peak_dist, prominence=prominence)
 
         if len(peaks) >= 2:
             valleys: List[int] = []
@@ -86,10 +89,13 @@ def segment_line_intervals(
                     break
             valleys.append(top_bound)
 
-            # Valleys between consecutive peaks
+            # Valleys between consecutive peaks (pick median of valley floor for centered cuts)
             for i in range(len(peaks) - 1):
                 p1, p2 = int(peaks[i]), int(peaks[i + 1])
-                v_idx = p1 + int(np.argmin(hpp[p1:p2]))
+                segment = hpp[p1:p2]
+                min_v = np.min(segment)
+                min_indices = np.where(segment == min_v)[0]
+                v_idx = p1 + int(np.median(min_indices))
                 valleys.append(v_idx)
 
             # Bottom boundary of last line
@@ -103,15 +109,36 @@ def segment_line_intervals(
                     break
             valleys.append(bottom_bound)
 
-            intervals: List[Tuple[int, int]] = []
+            raw_intervals: List[Tuple[int, int]] = []
             for i in range(len(peaks)):
                 y1 = valleys[i]
                 y2 = valleys[i + 1]
                 if (y2 - y1) >= min_line_height:
-                    intervals.append((y1, y2))
+                    raw_intervals.append((y1, y2))
 
-            if intervals:
-                return intervals
+            if raw_intervals:
+                # Merge sub-line splits (e.g. fragments narrower than 55% of median line height)
+                heights = [y2 - y1 for y1, y2 in raw_intervals]
+                med_h = float(np.median(heights)) if heights else 40.0
+                min_h_thresh = max(28, int(med_h * 0.55))
+
+                merged_peaks: List[Tuple[int, int]] = []
+                i = 0
+                while i < len(raw_intervals):
+                    y1, y2 = raw_intervals[i]
+                    curr_h = y2 - y1
+                    if curr_h < min_h_thresh and i + 1 < len(raw_intervals):
+                        ny1, ny2 = raw_intervals[i + 1]
+                        merged_peaks.append((y1, ny2))
+                        i += 2
+                    elif curr_h < min_h_thresh and merged_peaks:
+                        prev_y1, prev_y2 = merged_peaks.pop()
+                        merged_peaks.append((prev_y1, y2))
+                        i += 1
+                    else:
+                        merged_peaks.append((y1, y2))
+                        i += 1
+                return merged_peaks
 
     # Fallback to adaptive valley thresholding for sparse / synthetic pages
     non_zero = hpp[hpp > 0]
@@ -229,14 +256,14 @@ def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
 def segment_text_lines(
     rectified_bgr: np.ndarray,
     binary_image: np.ndarray,
-    padding: int = 4,
+    padding: int = 6,
 ) -> Tuple[List[Tuple[int, int, int, int]], List[np.ndarray], np.ndarray]:
     """
     Full line segmentation pipeline:
-    1. Computes Horizontal Projection Profile (HPP).
-    2. Identifies line vertical spans and merges descender micro-lines.
+    1. Computes Horizontal Projection Profile (HPP) with adaptive Gaussian smoothing.
+    2. Identifies line vertical spans using peak-valley analysis and merges sub-line splits.
     3. Finds tight horizontal bounds for each line.
-    4. Tightens line crops to true ink boundaries, preserving margin details.
+    4. Tightens line crops to true ink boundaries, preserving margin details and ascenders/descenders.
 
     Returns:
         bboxes: List of (x, y, w, h) bounding boxes sorted top-to-bottom.
@@ -245,7 +272,8 @@ def segment_text_lines(
     """
     try:
         img_h, img_w = rectified_bgr.shape[:2]
-        hpp = compute_horizontal_projection_profile(binary_image, sigma=3.0)
+        eff_sigma = max(4.5, min(7.5, img_h / 160.0))
+        hpp = compute_horizontal_projection_profile(binary_image, sigma=eff_sigma)
         raw_intervals = segment_line_intervals(hpp, min_line_height=12, min_gap=4)
 
         bboxes: List[Tuple[int, int, int, int]] = []
@@ -264,22 +292,24 @@ def segment_text_lines(
                 clean_next = clean_image[ny1:ny2, :]
                 nink = int(np.sum(clean_next > 0))
                 gap = ny1 - y2
-                # Only merge true tiny descender fragments (e.g. tails of р, у, д, з)
-                if gap <= 5 and nh <= 14 and nink < 300:
+                # Merge true descender fragments (e.g. tails of р, у, д, з)
+                if gap <= 5 and nh <= 18 and nink < 350:
                     y2 = ny2
                     i += 1
                 else:
                     break
             final_h = y2 - y1
             final_ink = int(np.sum(clean_image[y1:y2, :] > 0))
-            if final_ink >= 100 and final_h >= 12:
+            if final_ink >= 80 and final_h >= 12:
                 merged_intervals.append((y1, y2))
             i += 1
 
         for y1, y2 in merged_intervals:
-            # Add vertical padding
-            pad_y1 = max(0, y1 - padding)
-            pad_y2 = min(img_h, y2 + padding)
+            h_line = y2 - y1
+            # Add adaptive vertical padding so ascenders and descenders aren't clipped
+            pad = max(padding, int(h_line * 0.12))
+            pad_y1 = max(0, y1 - pad)
+            pad_y2 = min(img_h, y2 + pad)
 
             padded_clean_slice = clean_image[pad_y1:pad_y2, :]
             x1, x2 = calculate_line_horizontal_bounds(padded_clean_slice)
@@ -290,22 +320,24 @@ def segment_text_lines(
             w = pad_x2 - pad_x1
             h = pad_y2 - pad_y1
 
-            if w <= 16 or h <= 8:
+            if w <= 24 or h <= 12:
                 continue
 
             raw_crop = rectified_bgr[pad_y1:pad_y2, pad_x1:pad_x2].copy()
             tight_crop, dx = tighten_line_crop(raw_crop)
             final_w = tight_crop.shape[1]
+            final_h = tight_crop.shape[0]
             final_x = pad_x1 + dx
 
-            # Filter out isolated tiny debris/dust specks (< 40px width with negligible ink)
-            if final_w < 50:
-                gray_c = cv2.cvtColor(tight_crop, cv2.COLOR_BGR2GRAY) if len(tight_crop.shape) == 3 else tight_crop
-                _, bin_c = cv2.threshold(gray_c, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                if int(np.sum(bin_c > 0)) < 80:
-                    continue
+            # Filter out isolated tiny debris/dust specks (< 50px width or negligible ink)
+            if final_w < 50 or final_h < 12:
+                continue
 
-            bboxes.append((final_x, pad_y1, final_w, h))
+            crop_clean = suppress_grid_lines(binary_image[pad_y1:pad_y2, final_x:final_x + final_w])
+            if int(np.sum(crop_clean > 0)) < 90:
+                continue
+
+            bboxes.append((final_x, pad_y1, final_w, final_h))
             crops.append(tight_crop)
 
         # Ensure top-to-bottom sorting by y coordinate
