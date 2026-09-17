@@ -374,3 +374,23 @@ async def test_page_endpoints_and_transcription_edit(async_client: AsyncClient, 
     assert download_resp.status_code == 200
     assert len(download_resp.content) > 0
 
+    # 10. Test word suggestions endpoint
+    sug_resp = await async_client.get("/api/v1/recognition/suggest?word=биосоииальное&top_k=3")
+    assert sug_resp.status_code == 200
+    sug_list = sug_resp.json()
+    assert isinstance(sug_list, list)
+    assert len(sug_list) >= 1
+    assert any("биосоциальное" in c["word"] for c in sug_list)
+
+    # 11. Test line suggestions endpoint
+    line_sug_resp = await async_client.post(
+        "/api/v1/recognition/suggest-line",
+        json={"text": "человек биосоииальное существо", "confidence": 0.75, "top_k": 3},
+    )
+    assert line_sug_resp.status_code == 200
+    line_sugs = line_sug_resp.json()
+    assert isinstance(line_sugs, dict)
+    assert "биосоииальное" in line_sugs
+    assert any("биосоциальное" in c["word"] for c in line_sugs["биосоииальное"])
+
+

@@ -34,3 +34,11 @@ class PageRecognitionResult(BaseModel):
     total_lines: int
     lines: List[TextLineRead]
     combined_raw_text: str
+
+
+class LineSuggestionRequest(BaseModel):
+    """Parameters for obtaining handwriting suggestions for words in a line."""
+    text: str
+    confidence: float = 1.0
+    top_k: int = Field(default=3, ge=1, le=10)
+

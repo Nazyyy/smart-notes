@@ -109,3 +109,34 @@ class BackendAPIClient:
         resp = self.session.get(url, timeout=self.timeout)
         resp.raise_for_status()
         return resp.text
+
+    def get_word_suggestions(
+        self, word: str, context: Optional[str] = None, top_k: int = 3
+    ) -> List[Dict[str, Any]]:
+        """Fetch optical cursive word suggestions from backend."""
+        try:
+            url = f"{self.base_url}/recognition/suggest"
+            params: Dict[str, Any] = {"word": word, "top_k": top_k}
+            if context:
+                params["context"] = context
+            resp = self.session.get(url, params=params, timeout=3)
+            if resp.status_code == 200:
+                return resp.json()
+            return []
+        except Exception:
+            return []
+
+    def get_line_suggestions(
+        self, text: str, confidence: float = 1.0, top_k: int = 3
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch optical cursive suggestions for all uncertain words in a line."""
+        try:
+            url = f"{self.base_url}/recognition/suggest-line"
+            payload = {"text": text, "confidence": confidence, "top_k": top_k}
+            resp = self.session.post(url, json=payload, timeout=3)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+        except Exception:
+            return {}
+

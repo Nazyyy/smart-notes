@@ -11,7 +11,6 @@ import re
 import streamlit as st
 from PIL import Image
 from frontend.api_client import BackendAPIClient
-from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
 
 
 def render_confidence_indicator(confidence: float) -> str:
@@ -59,7 +58,6 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
         st.info("Сегментированные строки на странице отсутствуют.")
         return
 
-    corrector = get_handwriting_confusion_corrector()
     st.markdown(f"Всего обнаружено строк: **{len(lines)}**")
 
     for line in lines:
@@ -75,18 +73,17 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
             st.session_state[input_key] = text
 
         current_val = st.session_state[input_key]
-        words = [w.strip(".,;:!?()-\"\'") for w in current_val.split() if len(w.strip(".,;:!?()-\"\'")) >= 3]
 
-        # Identify uncertain words and calculate optical alternatives
-        uncertain_words_with_cands: Dict[str, List[Dict[str, Any]]] = {}
-        for w in words:
-            clean_lower = w.lower()
-            if clean_lower not in corrector.vocabulary or conf < 0.85:
-                cands = corrector.get_word_candidates(w, context_words=words, top_k=3)
-                # Only offer suggestions if candidate differs from original word
-                valid_cands = [c for c in cands if c["word"].lower() != clean_lower]
-                if valid_cands:
-                    uncertain_words_with_cands[w] = valid_cands
+        # Identify uncertain words and calculate optical alternatives via backend API
+        cache_key = f"cands_{line_id}_{hash(current_val)}"
+        if cache_key in st.session_state:
+            uncertain_words_with_cands = st.session_state[cache_key]
+        else:
+            uncertain_words_with_cands = api_client.get_line_suggestions(
+                text=current_val, confidence=conf, top_k=3
+            )
+            st.session_state[cache_key] = uncertain_words_with_cands
+
 
         with st.container():
             col_crop, col_edit, col_btn = st.columns([4, 6, 2])

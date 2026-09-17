@@ -15,7 +15,11 @@ from app.core.exceptions import PageNotFoundException
 from app.models.entities import DocumentStatus
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.page_repository import PageRepository
-from app.schemas.recognition import RecognitionProgressResponse, RecognitionTriggerRequest
+from app.schemas.recognition import (
+    LineSuggestionRequest,
+    RecognitionProgressResponse,
+    RecognitionTriggerRequest,
+)
 from app.services.document_service import DocumentService
 from app.services.processing_pipeline import DocumentProcessingPipeline
 
@@ -91,3 +95,40 @@ async def get_recognition_status(
         total_lines=total_lines,
         estimated_progress_pct=min(100.0, max(0.0, progress)),
     )
+
+
+@router.get(
+    "/suggest",
+    summary="Get optical handwriting candidates and alternatives for a word",
+)
+async def get_word_suggestions(
+    word: str,
+    context: str = "",
+    top_k: int = 3,
+) -> list[dict]:
+    """Return top handwriting confusion alternatives for uncertain or misrecognized words."""
+    from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
+    corrector = get_handwriting_confusion_corrector()
+    ctx_words = context.split() if context else None
+    return corrector.get_word_candidates(word, context_words=ctx_words, top_k=top_k)
+
+
+@router.post(
+    "/suggest-line",
+    summary="Get optical handwriting candidates for all uncertain words in a line",
+)
+async def suggest_line(req: LineSuggestionRequest) -> dict[str, list[dict]]:
+    """Scan line text, identify low-confidence / non-lexicon words, and return ranked candidates."""
+    from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
+    corrector = get_handwriting_confusion_corrector()
+    words = [w.strip(".,;:!?()-\"\'") for w in req.text.split() if len(w.strip(".,;:!?()-\"\'")) >= 3]
+    result: dict[str, list[dict]] = {}
+    for w in words:
+        clean_lower = w.lower()
+        if clean_lower not in corrector.vocabulary or req.confidence < 0.88:
+            cands = corrector.get_word_candidates(w, context_words=words, top_k=req.top_k)
+            valid_cands = [c for c in cands if c["word"].lower() != clean_lower]
+            if valid_cands:
+                result[w] = valid_cands
+    return result
+
