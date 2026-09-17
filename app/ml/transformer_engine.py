@@ -23,6 +23,9 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 
+from app.ml.vocabulary_binder import DomainVocabularyBinder
+
+
 def postprocess_scientific_and_academic(text: str) -> str:
     """
     Domain-specific normalizer for academic, scientific/chemistry, and common OCR artifacts.
@@ -35,77 +38,19 @@ def postprocess_scientific_and_academic(text: str) -> str:
     parts = [p.strip() for p in text.split("  |  ")]
     cleaned_parts: List[str] = []
     for p in parts:
-        # Filter out pure punctuation or single-letter noise artifacts (e.g. '.', 'М.', 'О.')
+        # Filter out pure punctuation or single-letter noise artifacts (e.g. '.', 'М.', 'О.', 'X')
         alpha_chars = re.sub(r"[\s\.\,\-\:\;\"\'\!\?\(\)]", "", p)
         if len(alpha_chars) <= 1 and not p.strip().isdigit():
             continue
         cleaned_parts.append(p)
 
     if not cleaned_parts:
-        # Fallback to original text if everything was filtered
         s = text
     else:
         s = " | ".join(cleaned_parts)
 
-    # 1. Clean misrecognized bullet markers and list prefixes
-    s = re.sub(r'^[«\"\'\.\,\-\–—\s]*([А-ЯA-Z])', r'\1', s)
-    s = re.sub(r'^[Юю9]\s*([А-ЯA-Z])', r'• \1', s)
-    s = re.sub(r'^-9\s*', r'• ', s)
-    s = re.sub(r'^\.\s*', r'• ', s)
-    s = re.sub(r'^(\d+)\.\1\b', r'\1.', s)           # e.g. 2.2 -> 2.
-    s = re.sub(r'^[Зз]\.\s*([А-Яа-я])', r'3. \1', s) # e.g. З.Свобода -> 3. Свобода
-
-    # 2. Academic & Humanities terminology
-    s = re.sub(r'\bАнтропог[ие]нез\b', 'Антропогенез', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bвозников[а-я\-]*\b', 'возникновения', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bСоциализ-теория\b', 'Социогенез - теория', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bСоциог[ие]нез\b', 'Социогенез', s, flags=re.IGNORECASE)
-    s = re.sub(r'\b[Юю]?Антропосоцио[а-я\-]*\b', '• Антропосоциогенез', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bЭниль[ес]\b', 'Энгельс', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bбио[гс]ральное\b', 'биосоциальное', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bблагоциальное\b', 'биосоциальное', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bвышлая\b', 'высшая', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bАнотомия\b', 'Анатомия', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bУтверно-полезному\b', 'твенно-полезному', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bСоздание и разум\b', 'Сознание и разум', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bструду\b', 'труду', s, flags=re.IGNORECASE)
-
-    # 3. Chemistry / Science normalizations
-    # H2S (сероводород)
-    s = re.sub(r'\bН[\.,\s]*[2]?5\b', 'H2S', s)
-    s = re.sub(r'\bн[\.,\s]*25\b', 'H2S', s)
-    s = re.sub(r'\b11[\.,\s]*5\b', 'H2S', s)
-    s = re.sub(r'\bСеро[\s\-]*роводерод\b', 'сероводород', s, flags=re.IGNORECASE)
-    s = re.sub(r'\bсеро[водерод]*\b', 'сероводород', s, flags=re.IGNORECASE)
-
-    # Water H2O
-    s = re.sub(r'\bН2[оОoO]\b', 'H2O', s)
-    s = re.sub(r'\bН[.,\s]*2[оОoO]\b', 'H2O', s)
-    s = re.sub(r'\bН\s*2\s*о\b', 'H2O', s)
-
-    # Oxides: SO2, CO2, MgO, NO
-    s = re.sub(r'\b50[\.,\s]*2\b', 'SO2', s)
-    s = re.sub(r'\b[sS]0[\.,\s]*2\b', 'SO2', s)
-    s = re.sub(r'\b[cC]0[\.,\s]*2\b', 'CO2', s)
-    s = re.sub(r'\bМ[дg][\.,\s]*[оОoO]?\b', lambda m: 'MgO' if 'о' in m.group(0).lower() or 'o' in m.group(0).lower() else 'Mg', s)
-    s = re.sub(r'\bбоет\s*Мд\b', 'SO2 + Mg', s)
-    s = re.sub(r'\bСорт\s*Мд\b', 'CO2 + Mg', s)
-
-    # Salts: FeS, CuS
-    s = re.sub(r'\bГе[б6]\b', 'FeS', s)
-    s = re.sub(r'\bСи[5sS]\b', 'CuS', s)
-
-    # Acids: H2SO4, HNO3, H2SO3
-    s = re.sub(r'\bболБг\b', 'H2SO4', s)
-    s = re.sub(r'\bипоз\s*з/[кК]\b', 'HNO3(к)', s)
-    s = re.sub(r'\bНе\s*бозн\b', 'H2SO3', s)
-
-    # 4. Clean quotation marks and trailing garbage
-    s = re.sub(r'[\"\'«»]', '', s)
-    s = re.sub(r'\s+[вс]\.?$', '', s)
-    s = re.sub(r'\s+М\.$', '', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-
+    # Apply comprehensive domain vocabulary binding and error correction
+    s = DomainVocabularyBinder.clean_and_bind(s)
     return s
 
 
@@ -152,7 +97,7 @@ class TransformerHTREngine:
         """
         Intelligently detect large column gaps (>= 38px of white space) such as
         two-column notebook tables or date headers.
-        Returns a list of (sub_crop, is_split) tuples.
+        Returns a list of (sub_crop, is_split) tuples. Trims empty margin on the right.
         """
         h, w = crop.shape[:2]
         if w <= 100:
@@ -175,14 +120,22 @@ class TransformerHTREngine:
             elif not g and in_gap:
                 in_gap = False
                 gap_len = x - gap_start
-                if gap_len >= 38 and gap_start >= 40 and (w - x) >= 40:
-                    split_xs.append((gap_start + x) // 2)
+                if gap_len >= 38 and gap_start >= 40:
+                    ink_left = int(np.sum(bin_crop[:, :gap_start] > 0))
+                    ink_right = int(np.sum(bin_crop[:, x:] > 0))
+                    # Only split as column if both sides have real text
+                    if (w - x) >= 40 and ink_left >= 60 and ink_right >= 60:
+                        split_xs.append((gap_start + x) // 2)
+                    elif ink_right < 60:
+                        # Right side is just empty margin paper, trim it!
+                        crop = crop[:, :gap_start]
+                        break
 
         if not split_xs:
             return [(crop, False)]
 
         # Cut column spans
-        bounds = [0] + split_xs + [w]
+        bounds = [0] + split_xs + [crop.shape[1]]
         spans: List[Tuple[np.ndarray, bool]] = []
         for b1, b2 in zip(bounds[:-1], bounds[1:]):
             sub_crop = crop[:, b1:b2]

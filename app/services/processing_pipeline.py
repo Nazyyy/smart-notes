@@ -151,15 +151,21 @@ class DocumentProcessingPipeline:
 
             # 8. Create and persist TextLine database records
             line_entities: List[TextLine] = []
+            line_counter = 0
             for idx, (x, y, w, h) in enumerate(bboxes):
                 text = transcriptions[idx] if idx < len(transcriptions) else ""
                 conf = confidences[idx] if idx < len(confidences) else 0.0
                 crop_rel_path = str(debug_dir / "lines" / f"line_{idx:03d}.jpg")
 
+                # Skip empty or uninformative noise lines
+                alnum_content = "".join(c for c in text if c.isalnum())
+                if not text.strip() or (len(alnum_content) <= 1 and not text.strip().isdigit()):
+                    continue
+
                 line_entities.append(
                     TextLine(
                         page_id=page_id,
-                        line_index=idx,
+                        line_index=line_counter,
                         bbox_x=x,
                         bbox_y=y,
                         bbox_w=w,
@@ -169,6 +175,7 @@ class DocumentProcessingPipeline:
                         confidence=conf,
                     )
                 )
+                line_counter += 1
 
             saved_lines = await page_repo.replace_page_lines(page_id, line_entities)
 

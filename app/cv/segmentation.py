@@ -155,20 +155,82 @@ def segment_line_intervals(
 
 def calculate_line_horizontal_bounds(
     binary_slice: np.ndarray,
-    min_content_threshold: int = 2,
+    min_content_threshold: int = 5,
 ) -> Tuple[int, int]:
     """
-    Determine left-most and right-most coordinates of text within a line slice.
+    Determine tight text bounds, ignoring checkered notebook grid lines and isolated margin specks.
     """
-    vpp = np.sum(binary_slice > 0, axis=0)
-    indices = np.where(vpp >= min_content_threshold)[0]
-
-    if len(indices) == 0:
+    clean = suppress_grid_lines(binary_slice)
+    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
+    vpp = np.sum(clean > 0, axis=0)
+    solid_cols = np.where(vpp >= min_content_threshold)[0]
+    if len(solid_cols) == 0:
         return 0, binary_slice.shape[1]
 
-    x_start = int(indices[0])
-    x_end = int(indices[-1])
-    return x_start, x_end
+    x1 = int(solid_cols[0])
+    x2 = int(solid_cols[-1])
+
+    # Prune left margin grid line residue (checkered paper vertical lines every ~28-30px)
+    while x1 + 35 < x2:
+        chunk_ink = int(np.sum(clean[:, x1:min(x2, x1 + 30)] > 0))
+        if chunk_ink < 45:
+            x1 += 30
+        else:
+            break
+
+    # Prune right margin grid line residue
+    while x2 - 35 > x1:
+        chunk_ink = int(np.sum(clean[:, max(x1, x2 - 30):x2] > 0))
+        if chunk_ink < 45:
+            x2 -= 30
+        else:
+            break
+
+    x1 = max(0, x1 - 10)
+    x2 = min(binary_slice.shape[1], x2 + 14)
+    return x1, x2
+
+
+def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
+    """
+    Refine crop boundaries by locating true ink clusters using Otsu binarization
+    and pruning checkered notebook grid lines on left and right borders.
+    Returns (tightened_crop, offset_x).
+    """
+    if crop is None or crop.size == 0 or crop.shape[0] < 8 or crop.shape[1] < 16:
+        return crop, 0
+
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
+    _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    clean = suppress_grid_lines(otsu)
+    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
+
+    vpp = np.sum(clean > 0, axis=0)
+    cols = np.where(vpp >= 5)[0]
+    if len(cols) == 0:
+        return crop, 0
+
+    x1, x2 = int(cols[0]), int(cols[-1])
+
+    # Prune right margin empty paper / faint grid lines
+    while x2 > x1 + 40:
+        chunk = int(np.sum(clean[:, max(x1, x2 - 30):x2] > 0))
+        if chunk < 45:
+            x2 -= 30
+        else:
+            break
+
+    # Prune left margin faint grid lines
+    while x1 + 40 < x2:
+        chunk = int(np.sum(clean[:, x1:min(x2, x1 + 30)] > 0))
+        if chunk < 45:
+            x1 += 30
+        else:
+            break
+
+    pad_left = max(0, x1 - 10)
+    pad_right = min(crop.shape[1], x2 + 14)
+    return crop[:, pad_left:pad_right], pad_left
 
 
 def segment_text_lines(
@@ -179,9 +241,9 @@ def segment_text_lines(
     """
     Full line segmentation pipeline:
     1. Computes Horizontal Projection Profile (HPP).
-    2. Identifies line vertical spans.
+    2. Identifies line vertical spans and merges descender micro-lines.
     3. Finds tight horizontal bounds for each line.
-    4. Slices image crops from rectified image.
+    4. Tightens line crops to true ink boundaries, filtering margin debris.
 
     Returns:
         bboxes: List of (x, y, w, h) bounding boxes sorted top-to-bottom.
@@ -191,36 +253,51 @@ def segment_text_lines(
     try:
         img_h, img_w = rectified_bgr.shape[:2]
         hpp = compute_horizontal_projection_profile(binary_image, sigma=3.0)
-        intervals = segment_line_intervals(hpp, min_line_height=12, min_gap=4)
+        raw_intervals = segment_line_intervals(hpp, min_line_height=12, min_gap=4)
 
         bboxes: List[Tuple[int, int, int, int]] = []
         crops: List[np.ndarray] = []
 
         clean_image = suppress_grid_lines(binary_image)
 
-        for y1, y2 in intervals:
-            h_raw = y2 - y1
-            # Check ink content in clean image without grid lines
-            clean_slice = clean_image[y1:y2, :]
-            clean_ink = int(np.sum(clean_slice > 0))
+        # Merge descender micro-lines and trailing letter tails into parent line
+        merged_intervals: List[Tuple[int, int]] = []
+        i = 0
+        while i < len(raw_intervals):
+            y1, y2 = raw_intervals[i]
+            while i + 1 < len(raw_intervals):
+                ny1, ny2 = raw_intervals[i + 1]
+                nh = ny2 - ny1
+                clean_next = clean_image[ny1:ny2, :]
+                nink = int(np.sum(clean_next > 0))
+                gap = ny1 - y2
+                if gap <= 6 and (nh < 30 or nink < 1300):
+                    y2 = ny2
+                    i += 1
+                else:
+                    break
+            final_h = y2 - y1
+            final_ink = int(np.sum(clean_image[y1:y2, :] > 0))
+            if final_ink >= 1000 and final_h >= 22:
+                merged_intervals.append((y1, y2))
+            elif final_ink >= 600 and final_h >= 18 and len(merged_intervals) > 0:
+                prev_y1, prev_y2 = merged_intervals[-1]
+                if (y1 - prev_y2) <= 12:
+                    merged_intervals[-1] = (prev_y1, y2)
+            elif final_ink >= 350 and final_h >= 16:
+                merged_intervals.append((y1, y2))
+            i += 1
 
-            # Filter out empty lines / pure checkered grid rows
-            if clean_ink < 1000 and not (clean_ink >= 450 and h_raw >= 25):
-                continue
-
-
-
-
+        for y1, y2 in merged_intervals:
             # Add vertical padding
             pad_y1 = max(0, y1 - padding)
             pad_y2 = min(img_h, y2 + padding)
 
-            padded_binary_slice = binary_image[pad_y1:pad_y2, :]
-            x1, x2 = calculate_line_horizontal_bounds(padded_binary_slice)
+            padded_clean_slice = clean_image[pad_y1:pad_y2, :]
+            x1, x2 = calculate_line_horizontal_bounds(padded_clean_slice)
 
-            # Add horizontal padding
-            pad_x1 = max(0, x1 - (padding * 2))
-            pad_x2 = min(img_w, x2 + (padding * 2))
+            pad_x1 = max(0, x1)
+            pad_x2 = min(img_w, x2)
 
             w = pad_x2 - pad_x1
             h = pad_y2 - pad_y1
@@ -228,10 +305,20 @@ def segment_text_lines(
             if w <= 16 or h <= 8:
                 continue
 
-            crop = rectified_bgr[pad_y1:pad_y2, pad_x1:pad_x2].copy()
+            raw_crop = rectified_bgr[pad_y1:pad_y2, pad_x1:pad_x2].copy()
+            tight_crop, dx = tighten_line_crop(raw_crop)
+            final_w = tight_crop.shape[1]
+            final_x = pad_x1 + dx
 
-            bboxes.append((pad_x1, pad_y1, w, h))
-            crops.append(crop)
+            # Filter out isolated tiny debris, smudges or empty margin fragments (< 90px width with low ink)
+            if final_w < 90:
+                gray_c = cv2.cvtColor(tight_crop, cv2.COLOR_BGR2GRAY) if len(tight_crop.shape) == 3 else tight_crop
+                _, bin_c = cv2.threshold(gray_c, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                if int(np.sum(bin_c > 0)) < 400:
+                    continue
+
+            bboxes.append((final_x, pad_y1, final_w, h))
+            crops.append(tight_crop)
 
         # Ensure top-to-bottom sorting by y coordinate
         sorted_pairs = sorted(zip(bboxes, crops), key=lambda item: item[0][1])
