@@ -89,8 +89,8 @@ def generate_synthetic_academic_crop(
 
 
 def build_trocr_dataset(
-    max_real_samples: int = 20000,
-    synthetic_samples: int = 4000,
+    max_real_samples: int = 55000,
+    synthetic_samples: int = 5000,
     output_dir: Path = ROOT_DIR / "data" / "processed_htr",
 ) -> Dict[str, Any]:
     """
@@ -309,4 +309,4 @@ def build_trocr_dataset(
 
 
 if __name__ == "__main__":
-    build_trocr_dataset(max_real_samples=16000, synthetic_samples=3000)
+    build_trocr_dataset(max_real_samples=55000, synthetic_samples=5000)

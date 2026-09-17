@@ -260,3 +260,9 @@ class DomainVocabularyBinder:
             return ""
 
         return s
+
+
+def postprocess_scientific_and_academic(text: str) -> str:
+    """Convenience alias for DomainVocabularyBinder.clean_and_bind."""
+    return DomainVocabularyBinder.clean_and_bind(text)
+

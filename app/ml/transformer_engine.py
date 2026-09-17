@@ -23,7 +23,8 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 
-from app.ml.vocabulary_binder import DomainVocabularyBinder
+from app.ml.vocabulary_binder import DomainVocabularyBinder, postprocess_scientific_and_academic
+from app.ml.language_model_rescorer import get_language_model_rescorer
 from app.cv.enhancer import generate_tta_variants
 from app.cv.segmentation import suppress_grid_lines
 
@@ -74,6 +75,7 @@ class TransformerHTREngine:
         # Check if fine-tuned or line-level model exists, otherwise fallback to base model
         if not preferred_path.exists():
             for alt_candidate in [
+                Path("./data/weights/trocr_base_academic"),
                 Path("./data/weights/trocr_finetuned_academic"),
                 Path("./data/weights/trocr_ru_lines"),
                 Path("./data/weights/trocr_ru"),
@@ -252,12 +254,15 @@ class TransformerHTREngine:
 
                 if candidates:
                     scored = []
+                    rescorer = get_language_model_rescorer()
                     for c_text, conf_list in candidates.items():
                         words = c_text.split()
                         length_weight = 1.0 if len(words) >= 3 else (0.75 if len(words) == 2 else 0.4)
                         consensus_bonus = 0.15 * (len(conf_list) - 1)
-                        total_score = (float(np.mean(conf_list)) + consensus_bonus) * length_weight
-                        scored.append((total_score, float(np.mean(conf_list)), c_text))
+                        mean_conf = float(np.mean(conf_list))
+                        lm_score = rescorer.score_sequence(c_text)
+                        total_score = (mean_conf + consensus_bonus + 0.04 * lm_score) * length_weight
+                        scored.append((total_score, mean_conf, c_text))
                     scored.sort(reverse=True)
                     span_results.append((scored[0][2], scored[0][1]))
                 else:
@@ -292,9 +297,15 @@ class TransformerHTREngine:
                         )
 
                 token_ids = outputs.sequences
-                raw_text = self.processor.batch_decode(token_ids, skip_special_tokens=True)[0]
-                clean = postprocess_scientific_and_academic(raw_text)
-                span_results.append((clean, 0.88))
+                decoded_candidates = self.processor.batch_decode(token_ids, skip_special_tokens=True)
+                rescorer = get_language_model_rescorer()
+                clean_candidates = [
+                    (postprocess_scientific_and_academic(t), 0.0)
+                    for t in decoded_candidates
+                    if t.strip()
+                ]
+                best_text = rescorer.rescore_candidates(clean_candidates) if clean_candidates else ""
+                span_results.append((best_text, 0.88))
 
         if not span_results:
             return "", 0.0

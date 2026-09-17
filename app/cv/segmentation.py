@@ -11,6 +11,11 @@ from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 from app.core.exceptions import ImageProcessingException
 from app.core.logging import get_logger
+from app.cv.advanced_segmentation import (
+    compute_line_seams,
+    extract_seam_carved_crop,
+    straighten_text_line,
+)
 
 logger = get_logger(__name__)
 
@@ -344,7 +349,10 @@ def segment_text_lines(
                 merged_intervals.append((y1, y2))
             i += 1
 
-        for y1, y2 in merged_intervals:
+        # Precompute non-linear separating seams between consecutive lines
+        seams = compute_line_seams(clean_image, merged_intervals)
+
+        for line_idx, (y1, y2) in enumerate(merged_intervals):
             # Drop bottom table border/shadow artifact (spans bottom 8% of page with huge width)
             if y2 >= img_h - 10 and y1 >= img_h - 80:
                 continue
@@ -367,10 +375,19 @@ def segment_text_lines(
             if w <= 24 or h <= 12:
                 continue
 
-            raw_crop = rectified_bgr[pad_y1:pad_y2, pad_x1:pad_x2].copy()
+            top_seam = seams[line_idx - 1] if line_idx > 0 and len(seams) >= line_idx else None
+            bottom_seam = seams[line_idx] if line_idx < len(seams) else None
+
+            # Non-linear seam carved crop preserving true ascenders/descenders
+            raw_crop = extract_seam_carved_crop(
+                rectified_bgr, clean_image, top_seam, bottom_seam, pad_y1, pad_y2, pad_x1, pad_x2
+            )
             tight_crop, dx = tighten_line_crop(raw_crop)
-            final_w = tight_crop.shape[1]
-            final_h = tight_crop.shape[0]
+            # Straighten slightly tilted/wavy lines for optimal TrOCR input
+            straight_crop = straighten_text_line(tight_crop)
+
+            final_w = straight_crop.shape[1]
+            final_h = straight_crop.shape[0]
             final_x = pad_x1 + dx
 
             # Filter out isolated tiny debris/dust specks (< 50px width or negligible ink)
@@ -382,7 +399,7 @@ def segment_text_lines(
                 continue
 
             bboxes.append((final_x, pad_y1, final_w, final_h))
-            crops.append(tight_crop)
+            crops.append(straight_crop)
 
         # Ensure top-to-bottom sorting by y coordinate
         sorted_pairs = sorted(zip(bboxes, crops), key=lambda item: item[0][1])

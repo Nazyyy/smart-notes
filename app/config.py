@@ -82,12 +82,16 @@ class Settings(BaseSettings):
     )
     ML_TRANSFORMER_PATH: Path = Field(
         default=(
-            Path("./data/weights/trocr_finetuned_academic")
-            if Path("./data/weights/trocr_finetuned_academic").exists()
+            Path("./data/weights/trocr_base_academic")
+            if Path("./data/weights/trocr_base_academic").exists()
             else (
-                Path("./data/weights/trocr_ru_lines")
-                if Path("./data/weights/trocr_ru_lines").exists()
-                else Path("./data/weights/trocr_ru")
+                Path("./data/weights/trocr_finetuned_academic")
+                if Path("./data/weights/trocr_finetuned_academic").exists()
+                else (
+                    Path("./data/weights/trocr_ru_lines")
+                    if Path("./data/weights/trocr_ru_lines").exists()
+                    else Path("./data/weights/trocr_ru")
+                )
             )
         ),
         description="Path to local directory with serialized TrOCR model"
