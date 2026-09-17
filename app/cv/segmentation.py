@@ -4,7 +4,7 @@ Handwritten Text Line Segmentation via Horizontal Projection Profiles (HPP).
 Extracts line bounding boxes and cuts individual text line crops.
 """
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import numpy as np
 import cv2
 from scipy.ndimage import gaussian_filter1d
@@ -38,6 +38,32 @@ def suppress_grid_lines(binary: np.ndarray) -> np.ndarray:
     except Exception:
         pass
     return binary
+
+
+def suppress_pencil_underlines(rectified_bgr: Optional[np.ndarray], binary: np.ndarray) -> np.ndarray:
+    """
+    Remove horizontal graphite pencil lines (subject 1-line, predicate 2-line underlines)
+    so they do not bridge adjacent text lines during vertical projection profile analysis.
+    """
+    if rectified_bgr is None or len(rectified_bgr.shape) != 3:
+        return binary
+    try:
+        hsv = cv2.cvtColor(rectified_bgr, cv2.COLOR_BGR2HSV)
+        s = hsv[:, :, 1]
+        v = hsv[:, :, 2]
+        # Graphite pencil: low color saturation (gray/silver) and medium/dark brightness
+        pencil_mask = (s < 32) & (v < 185) & (binary > 0)
+        pencil_uint8 = (pencil_mask.astype(np.uint8)) * 255
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (18, 1))
+        pencil_lines = cv2.morphologyEx(pencil_uint8, cv2.MORPH_OPEN, h_kernel)
+        pencil_lines = cv2.dilate(pencil_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 2)), iterations=1)
+        clean = cv2.subtract(binary, pencil_lines)
+        if np.sum(clean > 0) >= 150:
+            return clean
+    except Exception:
+        pass
+    return binary
+
 
 
 def compute_horizontal_projection_profile(binary: np.ndarray, sigma: float = 3.0) -> np.ndarray:
@@ -77,8 +103,8 @@ def segment_line_intervals(
 
     # Attempt peak detection if there is sufficient dynamic range
     if dynamic_range > 8.0:
-        prominence = max(4.0, dynamic_range * 0.06)
-        peak_dist = min_peak_distance if min_peak_distance > 0 else max(28, int(height * 0.030))
+        prominence = max(3.0, dynamic_range * 0.04)
+        peak_dist = min_peak_distance if min_peak_distance > 0 else max(18, int(height * 0.016))
         peaks, _ = find_peaks(hpp, distance=peak_dist, prominence=prominence)
 
         if len(peaks) >= 2:
@@ -122,10 +148,10 @@ def segment_line_intervals(
                     raw_intervals.append((y1, y2))
 
             if raw_intervals:
-                # Merge sub-line splits (e.g. fragments narrower than 55% of median line height)
+                # Merge tiny sub-line splits (fragments narrower than 35% of median line height)
                 heights = [y2 - y1 for y1, y2 in raw_intervals]
                 med_h = float(np.median(heights)) if heights else 40.0
-                min_h_thresh = max(28, int(med_h * 0.55))
+                min_h_thresh = max(14, int(med_h * 0.35))
 
                 merged_peaks: List[Tuple[int, int]] = []
                 i = 0
@@ -134,15 +160,13 @@ def segment_line_intervals(
                     curr_h = y2 - y1
                     if curr_h < min_h_thresh and i + 1 < len(raw_intervals):
                         ny1, ny2 = raw_intervals[i + 1]
-                        merged_peaks.append((y1, ny2))
-                        i += 2
-                    elif curr_h < min_h_thresh and merged_peaks:
-                        prev_y1, prev_y2 = merged_peaks.pop()
-                        merged_peaks.append((prev_y1, y2))
-                        i += 1
-                    else:
-                        merged_peaks.append((y1, y2))
-                        i += 1
+                        # Only merge if combined height will not exceed normal line height
+                        if (ny2 - y1) <= int(med_h * 1.35):
+                            merged_peaks.append((y1, ny2))
+                            i += 2
+                            continue
+                    merged_peaks.append((y1, y2))
+                    i += 1
                 return merged_peaks
 
     # Fallback to adaptive valley thresholding for sparse / synthetic pages
@@ -216,7 +240,7 @@ def calculate_line_horizontal_bounds(
     """
     clean = suppress_grid_lines(binary_slice)
     clean = remove_vertical_ruling_artifacts(clean)
-    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)))
+    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
     vpp = np.sum(clean > 0, axis=0)
     solid_cols = np.where(vpp >= min_content_threshold)[0]
     if len(solid_cols) == 0:
@@ -239,14 +263,32 @@ def calculate_line_horizontal_bounds(
         cw = e - s + 1
         c_ink = int(np.sum(clean[:, s:e + 1] > 0))
         if cw >= 8 and c_ink >= 25:
-            valid_clusters.append((s, e))
+            valid_clusters.append((s, e, c_ink))
 
     if not valid_clusters:
         return int(solid_cols[0]), int(solid_cols[-1])
 
+    # Filter out edge clusters from neighboring notebook pages (e.g. left margin snippets)
+    total_valid_ink = sum(c[2] for c in valid_clusters)
+    if len(valid_clusters) >= 2:
+        c0_s, c0_e, c0_ink = valid_clusters[0]
+        c1_s, c1_e, _ = valid_clusters[1]
+        gap_left = c1_s - c0_e
+        if c0_s <= 75 and gap_left >= 40 and (c0_ink / max(1, total_valid_ink)) < 0.15:
+            valid_clusters = valid_clusters[1:]
+
+    # Filter out desk / edge paper fragments on right margin
+    if len(valid_clusters) >= 2:
+        c_last_s, c_last_e, c_last_ink = valid_clusters[-1]
+        c_prev_s, c_prev_e, _ = valid_clusters[-2]
+        gap_right = c_last_s - c_prev_e
+        if (binary_slice.shape[1] - c_last_e) <= 80 and gap_right >= 40 and (c_last_ink / max(1, total_valid_ink)) < 0.15:
+            valid_clusters = valid_clusters[:-1]
+
     x1 = max(0, valid_clusters[0][0] - 12)
     x2 = min(binary_slice.shape[1], valid_clusters[-1][1] + 14)
     return x1, x2
+
 
 
 def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
@@ -317,14 +359,14 @@ def segment_text_lines(
     """
     try:
         img_h, img_w = rectified_bgr.shape[:2]
+        clean_image = suppress_grid_lines(binary_image)
+        clean_image = suppress_pencil_underlines(rectified_bgr, clean_image)
         eff_sigma = max(4.5, min(7.5, img_h / 160.0))
-        hpp = compute_horizontal_projection_profile(binary_image, sigma=eff_sigma)
+        hpp = compute_horizontal_projection_profile(clean_image, sigma=eff_sigma)
         raw_intervals = segment_line_intervals(hpp, min_line_height=12, min_gap=4)
 
         bboxes: List[Tuple[int, int, int, int]] = []
         crops: List[np.ndarray] = []
-
-        clean_image = suppress_grid_lines(binary_image)
 
         # Merge descender micro-lines and trailing letter tails into parent line
         merged_intervals: List[Tuple[int, int]] = []
@@ -349,13 +391,45 @@ def segment_text_lines(
                 merged_intervals.append((y1, y2))
             i += 1
 
+        # Multi-line recursive splitting: guarantee that merged double-lines never reach OCR
+        if merged_intervals:
+            line_heights = [y2 - y1 for y1, y2 in merged_intervals]
+            med_line_h = float(np.median(line_heights)) if line_heights else 40.0
+            split_intervals: List[Tuple[int, int]] = []
+            for y1, y2 in merged_intervals:
+                curr_h = y2 - y1
+                if curr_h >= 1.35 * med_line_h and curr_h >= 55:
+                    slice_bin = clean_image[y1:y2, :]
+                    row_ink = np.sum(slice_bin > 0, axis=1).astype(np.float32)
+                    smooth_ink = gaussian_filter1d(row_ink, sigma=2.0)
+                    lo = int(curr_h * 0.28)
+                    hi = int(curr_h * 0.72)
+                    if hi > lo:
+                        mid_segment = smooth_ink[lo:hi]
+                        min_mid = float(np.min(mid_segment))
+                        max_top = float(np.max(smooth_ink[:lo])) if lo > 0 else 1.0
+                        max_bot = float(np.max(smooth_ink[hi:])) if hi < curr_h else 1.0
+                        if min_mid < 0.75 * min(max_top, max_bot) or min_mid < 45.0:
+                            v_rel = lo + int(np.argmin(mid_segment))
+                            split_y = y1 + v_rel
+                            if (split_y - y1) >= 15 and (y2 - split_y) >= 15:
+                                split_intervals.append((y1, split_y))
+                                split_intervals.append((split_y, y2))
+                                continue
+                split_intervals.append((y1, y2))
+            merged_intervals = split_intervals
+
         # Precompute non-linear separating seams between consecutive lines
         seams = compute_line_seams(clean_image, merged_intervals)
 
         for line_idx, (y1, y2) in enumerate(merged_intervals):
+            # Drop top table / desk / border artifact (spans top 8% of page)
+            if y2 <= int(img_h * 0.08) and y1 <= int(img_h * 0.055):
+                continue
             # Drop bottom table border/shadow artifact (spans bottom 8% of page with huge width)
             if y2 >= img_h - 10 and y1 >= img_h - 80:
                 continue
+
 
             h_line = y2 - y1
             # Add adaptive vertical padding so ascenders and descenders aren't clipped
@@ -393,6 +467,11 @@ def segment_text_lines(
             # Filter out isolated tiny debris/dust specks (< 50px width or negligible ink)
             if final_w < 50 or final_h < 12:
                 continue
+
+            # Filter out tiny margin spillover / neighbor page ruling fragments
+            if final_w < 130 and (final_x <= 40 or (final_x + final_w) >= img_w - 40):
+                continue
+
 
             crop_clean = suppress_grid_lines(binary_image[pad_y1:pad_y2, final_x:final_x + final_w])
             if int(np.sum(crop_clean > 0)) < 90:

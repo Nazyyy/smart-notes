@@ -94,7 +94,13 @@ class TransformerHTREngine:
         try:
             self.processor = TrOCRProcessor.from_pretrained(str(self.model_path))
             self.model = VisionEncoderDecoderModel.from_pretrained(str(self.model_path))
-            self.model.to(self.device)
+            try:
+                self.model.to(self.device)
+            except torch.cuda.OutOfMemoryError:
+                logger.warning("CUDA memory pressure encountered, falling back to CPU for inference.")
+                self.device = torch.device("cpu")
+                self.model.to(self.device)
+
             self.model.eval()
 
             if self.device.type == "cuda":
@@ -105,6 +111,7 @@ class TransformerHTREngine:
                     pass
 
             logger.info("TransformerHTREngine loaded successfully on %s.", self.device)
+
         except Exception as exc:
             logger.error("Failed to load Transformer model from %s: %s", self.model_path, exc)
             raise ModelInferenceException(f"Failed to load Transformer model: {exc}") from exc

@@ -76,7 +76,8 @@ class PageRepository(BaseRepository[Page]):
                 line.page_id = page_id
                 self.session.add(line)
 
-            await self.session.flush()
+            await self.session.commit()
+
 
             # Return newly inserted lines in order
             stmt = (

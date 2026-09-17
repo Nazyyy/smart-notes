@@ -200,9 +200,13 @@ def train_trocr_base(
     scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda"))
 
     best_cer = float("inf")
+    patience_limit = 4
+    no_improve_count = 0
+    early_stop_triggered = False
     output_dir.mkdir(parents=True, exist_ok=True)
     global_step = 0
     t_start = time.time()
+
 
     print(f"\n[*] Starting training: {epochs} epochs | Effective Batch Size: {batch_size * accum_steps} | Steps: {total_steps}...")
 
@@ -279,11 +283,25 @@ def train_trocr_base(
 
                     if avg_cer < best_cer:
                         best_cer = avg_cer
+                        no_improve_count = 0
                         print(f"  [★ NEW BEST] Saving TrOCR-Base checkpoint to {output_dir}...")
                         model.save_pretrained(str(output_dir))
                         processor.save_pretrained(str(output_dir))
+                    else:
+                        no_improve_count += 1
+                        print(f"  [!] Validation CER did not improve ({no_improve_count}/{patience_limit} patience checks)")
+                        if no_improve_count >= patience_limit:
+                            print(f"\n[🛑 EARLY STOPPING] Triggered at step {global_step} to strictly prevent overfitting! Best CER achieved: {best_cer * 100:.2f}%.")
+                            early_stop_triggered = True
+                            break
 
                     model.train()
+
+            if early_stop_triggered:
+                break
+        if early_stop_triggered:
+            break
+
 
     # Final checkpoint save
     print(f"\n[✓] Training complete in {(time.time() - t_start)/60:.1f} minutes! Best CER: {best_cer * 100:.2f}%")
@@ -293,8 +311,10 @@ def train_trocr_base(
 if __name__ == "__main__":
     train_trocr_base(
         manifest_path=ROOT_DIR / "data" / "processed_htr" / "trocr_manifest.json",
-        epochs=2,
+        epochs=3,
         batch_size=2,
         accum_steps=12,
-        eval_steps=250,
+        eval_steps=300,
+        lr=2.0e-5,
     )
+

@@ -213,8 +213,16 @@ class DocumentProcessingPipeline:
             await doc_repo.update_status(document_id, DocumentStatus.COMPLETED)
             logger.info("Successfully completed pipeline for Document %s, Page %s", document_id, page_id)
 
+            # Ensure background tasks commit transactions to SQLite
+            try:
+                await page_repo.session.commit()
+                await doc_repo.session.commit()
+            except Exception:
+                pass
+
             refreshed_page = await page_repo.get_page_with_lines(page_id)
             return refreshed_page or page
+
 
         except Exception as exc:
             logger.error("Processing pipeline failed for Document %s, Page %s: %s", document_id, page_id, exc, exc_info=True)
