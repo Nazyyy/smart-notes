@@ -5,6 +5,12 @@ Features drag-and-drop ingestion, OpenCV stages viewer, interactive line editor,
 and KaTeX-enabled Markdown structured export.
 """
 
+import sys
+from pathlib import Path
+project_root = Path(__file__).resolve().parent.parent
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
 from typing import Any, Dict, List, Optional
 import streamlit as st
 
