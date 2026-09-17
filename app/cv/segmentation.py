@@ -153,14 +153,37 @@ def segment_line_intervals(
     return merged
 
 
+def remove_vertical_ruling_artifacts(binary_slice: np.ndarray) -> np.ndarray:
+    """
+    Remove vertical line artifacts (e.g. margin red/blue ruling line, notebook grid rules)
+    from a line slice without destroying genuine character strokes.
+    Vertical ruling lines have very high aspect ratio (height >= 75% of slice, width <= 3px).
+    """
+    h, w = binary_slice.shape[:2]
+    if h < 8 or w < 8:
+        return binary_slice
+
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary_slice, connectivity=8)
+    clean = binary_slice.copy()
+    for lbl in range(1, num_labels):
+        comp_w = stats[lbl, cv2.CC_STAT_WIDTH]
+        comp_h = stats[lbl, cv2.CC_STAT_HEIGHT]
+        # Only eliminate if it is very tall and razor thin (grid or margin ruling line)
+        if comp_w <= 3 and comp_h >= int(h * 0.70):
+            clean[labels == lbl] = 0
+    return clean
+
+
 def calculate_line_horizontal_bounds(
     binary_slice: np.ndarray,
-    min_content_threshold: int = 5,
+    min_content_threshold: int = 3,
 ) -> Tuple[int, int]:
     """
     Determine tight text bounds, ignoring checkered notebook grid lines and isolated margin specks.
+    Preserves initial numbering, bullets, and trailing punctuation.
     """
     clean = suppress_grid_lines(binary_slice)
+    clean = remove_vertical_ruling_artifacts(clean)
     clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
     vpp = np.sum(clean > 0, axis=0)
     solid_cols = np.where(vpp >= min_content_threshold)[0]
@@ -170,23 +193,8 @@ def calculate_line_horizontal_bounds(
     x1 = int(solid_cols[0])
     x2 = int(solid_cols[-1])
 
-    # Prune left margin grid line residue (checkered paper vertical lines every ~28-30px)
-    while x1 + 35 < x2:
-        chunk_ink = int(np.sum(clean[:, x1:min(x2, x1 + 30)] > 0))
-        if chunk_ink < 45:
-            x1 += 30
-        else:
-            break
-
-    # Prune right margin grid line residue
-    while x2 - 35 > x1:
-        chunk_ink = int(np.sum(clean[:, max(x1, x2 - 30):x2] > 0))
-        if chunk_ink < 45:
-            x2 -= 30
-        else:
-            break
-
-    x1 = max(0, x1 - 10)
+    # Generous safety padding so outer strokes, digits, and punctuation are never truncated
+    x1 = max(0, x1 - 12)
     x2 = min(binary_slice.shape[1], x2 + 14)
     return x1, x2
 
@@ -194,7 +202,7 @@ def calculate_line_horizontal_bounds(
 def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
     """
     Refine crop boundaries by locating true ink clusters using Otsu binarization
-    and pruning checkered notebook grid lines on left and right borders.
+    and pruning margin ruling artifacts while preserving initial characters/digits.
     Returns (tightened_crop, offset_x).
     """
     if crop is None or crop.size == 0 or crop.shape[0] < 8 or crop.shape[1] < 16:
@@ -203,33 +211,18 @@ def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     clean = suppress_grid_lines(otsu)
+    clean = remove_vertical_ruling_artifacts(clean)
     clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
 
     vpp = np.sum(clean > 0, axis=0)
-    cols = np.where(vpp >= 5)[0]
+    cols = np.where(vpp >= 3)[0]
     if len(cols) == 0:
         return crop, 0
 
     x1, x2 = int(cols[0]), int(cols[-1])
 
-    # Prune right margin empty paper / faint grid lines
-    while x2 > x1 + 40:
-        chunk = int(np.sum(clean[:, max(x1, x2 - 30):x2] > 0))
-        if chunk < 45:
-            x2 -= 30
-        else:
-            break
-
-    # Prune left margin faint grid lines
-    while x1 + 40 < x2:
-        chunk = int(np.sum(clean[:, x1:min(x2, x1 + 30)] > 0))
-        if chunk < 45:
-            x1 += 30
-        else:
-            break
-
     pad_left = max(0, x1 - 10)
-    pad_right = min(crop.shape[1], x2 + 14)
+    pad_right = min(crop.shape[1], x2 + 12)
     return crop[:, pad_left:pad_right], pad_left
 
 
@@ -243,7 +236,7 @@ def segment_text_lines(
     1. Computes Horizontal Projection Profile (HPP).
     2. Identifies line vertical spans and merges descender micro-lines.
     3. Finds tight horizontal bounds for each line.
-    4. Tightens line crops to true ink boundaries, filtering margin debris.
+    4. Tightens line crops to true ink boundaries, preserving margin details.
 
     Returns:
         bboxes: List of (x, y, w, h) bounding boxes sorted top-to-bottom.
@@ -271,20 +264,15 @@ def segment_text_lines(
                 clean_next = clean_image[ny1:ny2, :]
                 nink = int(np.sum(clean_next > 0))
                 gap = ny1 - y2
-                if gap <= 6 and (nh < 30 or nink < 1300):
+                # Only merge true tiny descender fragments (e.g. tails of р, у, д, з)
+                if gap <= 5 and nh <= 14 and nink < 300:
                     y2 = ny2
                     i += 1
                 else:
                     break
             final_h = y2 - y1
             final_ink = int(np.sum(clean_image[y1:y2, :] > 0))
-            if final_ink >= 1000 and final_h >= 22:
-                merged_intervals.append((y1, y2))
-            elif final_ink >= 600 and final_h >= 18 and len(merged_intervals) > 0:
-                prev_y1, prev_y2 = merged_intervals[-1]
-                if (y1 - prev_y2) <= 12:
-                    merged_intervals[-1] = (prev_y1, y2)
-            elif final_ink >= 350 and final_h >= 16:
+            if final_ink >= 100 and final_h >= 12:
                 merged_intervals.append((y1, y2))
             i += 1
 
@@ -310,11 +298,11 @@ def segment_text_lines(
             final_w = tight_crop.shape[1]
             final_x = pad_x1 + dx
 
-            # Filter out isolated tiny debris, smudges or empty margin fragments (< 90px width with low ink)
-            if final_w < 90:
+            # Filter out isolated tiny debris/dust specks (< 40px width with negligible ink)
+            if final_w < 50:
                 gray_c = cv2.cvtColor(tight_crop, cv2.COLOR_BGR2GRAY) if len(tight_crop.shape) == 3 else tight_crop
                 _, bin_c = cv2.threshold(gray_c, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-                if int(np.sum(bin_c > 0)) < 400:
+                if int(np.sum(bin_c > 0)) < 80:
                     continue
 
             bboxes.append((final_x, pad_y1, final_w, h))

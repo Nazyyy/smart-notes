@@ -26,6 +26,12 @@ from app.cv.visualizer import (
     draw_bounding_boxes_overlay,
     save_pipeline_debug_artifacts,
 )
+from app.cv.enhancer import (
+    enhance_stroke_sharpness,
+    enhance_contrast_adaptive,
+    suppress_paper_bleed_through,
+    generate_tta_variants,
+)
 
 __all__ = [
     "detect_document_contour",
@@ -43,4 +49,8 @@ __all__ = [
     "render_projection_profile_image",
     "draw_bounding_boxes_overlay",
     "save_pipeline_debug_artifacts",
+    "enhance_stroke_sharpness",
+    "enhance_contrast_adaptive",
+    "suppress_paper_bleed_through",
+    "generate_tta_variants",
 ]
