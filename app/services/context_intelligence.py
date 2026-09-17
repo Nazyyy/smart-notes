@@ -210,13 +210,19 @@ class ContextIntelligenceEngine:
         return corrected
 
     @classmethod
-    def structure_into_markdown(cls, lines: List[str], doc_title: str) -> str:
+    def structure_into_markdown(
+        cls,
+        lines: List[str],
+        doc_title: str = "Конспект лекции",
+        document_title: Optional[str] = None,
+    ) -> str:
         """
         Structure lines into clean, highly readable Markdown note.
         Detects two-column comparison tables and structures bullet points and headers.
         """
+        effective_title = document_title or doc_title
         if not lines:
-            return f"# {doc_title}\n\n*(Конспект пуст)*\n"
+            return f"# {effective_title}\n\n*(Конспект пуст)*\n"
 
         domain = cls.classify_domain(lines)
         stitched = cls.dewrap_and_stitch_lines(lines)
@@ -264,12 +270,16 @@ class ContextIntelligenceEngine:
         if not s:
             return
 
-        # Check for math formula
-        math_indicators = ["=", "\\int", "\\sum", "\\sqrt", "\\frac", "^", "dx"]
-        if sum(1 for sym in math_indicators if sym in s) >= 1 and ("=" in s or "^" in s or "\\" in s) and len(s) < 50 and not (" - " in s):
-            clean_math = s.strip("$ ")
-            md_output.append(f"\n$$\n{clean_math}\n$$\n")
+        # Check for math formula or chemical equation
+        from app.ml.formula_recognizer import get_formula_recognizer
+        formula_rec = get_formula_recognizer()
+        if formula_rec.is_formula_line(s):
+            formatted_formula = formula_rec.format_line(s)
+            md_output.append(f"\n{formatted_formula}\n")
             return
+
+        # Format inline formulas and chemical terms
+        s = formula_rec.format_line(s)
 
         # Explicit lecture/chapter header
         if re.search(r'^(?:лекция|тема|глава)\b', s, re.IGNORECASE):

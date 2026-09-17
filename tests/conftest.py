@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 # Set test environment overrides before app imports
 os.environ["ENVIRONMENT"] = "testing"
 os.environ["DEBUG"] = "false"
+os.environ["DATABASE_URL"] = "sqlite+aiosqlite:////tmp/smart_notes_test_sqlite.db"
+os.environ["ML_USE_TRANSFORMER"] = "false"
 
 from app.config import Settings, get_settings
 from app.db.session import Base, get_db_session
@@ -41,17 +43,37 @@ def test_settings(temp_dir: Path) -> Settings:
     settings.STORAGE_ROOT = temp_dir / "storage"
     settings.STORAGE_ROOT.mkdir(parents=True, exist_ok=True)
     settings.ML_MODEL_WEIGHTS_PATH = temp_dir / "weights" / "test_crnn_weights.pt"
+    settings.ML_USE_TRANSFORMER = False
     ensure_weights_exist(settings.ML_MODEL_WEIGHTS_PATH)
     return settings
 
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture(scope="session")
 async def test_engine(temp_dir: Path):
-    """Create isolated SQLite async engine for test execution."""
-    db_file = temp_dir / f"test_{tempfile.mktemp(dir='')}.db"
+    """Create isolated SQLite async engine for test execution and bind module engine."""
+    import app.db.session as session_module
+    from sqlalchemy import event
+
+    db_file = temp_dir / "test_suite.db"
     test_db_url = f"sqlite+aiosqlite:///{db_file}"
 
-    engine = create_async_engine(test_db_url, echo=False)
+    engine = create_async_engine(test_db_url, echo=False, connect_args={"timeout": 60})
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_test_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=60000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
+
+    session_module.engine = engine
+    session_module.async_session_factory = async_sessionmaker(
+        bind=engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
     async with engine.begin() as conn:
         import app.models.entities  # noqa: F401
         await conn.run_sync(Base.metadata.create_all)
@@ -67,22 +89,24 @@ async def test_engine(temp_dir: Path):
 
 @pytest_asyncio.fixture(scope="function")
 async def test_db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Provide transactional database session for tests."""
-    session_factory = async_sessionmaker(
-        bind=test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-    async with session_factory() as session:
+    """Provide transactional database session for direct test fixtures."""
+    import app.db.session as session_module
+    async with session_module.async_session_factory() as session:
         yield session
-        await session.rollback()
 
 
 @pytest_asyncio.fixture(scope="function")
-async def async_client(test_db_session: AsyncSession, test_settings: Settings) -> AsyncGenerator[AsyncClient, None]:
-    """Provide HTTPX async client bound to FastAPI application with test database."""
-    async def override_get_db_session():
-        yield test_db_session
+async def async_client(test_engine, test_settings: Settings) -> AsyncGenerator[AsyncClient, None]:
+    """Provide HTTPX async client bound to FastAPI application with isolated sessions."""
+    import app.db.session as session_module
+
+    async def override_get_db_session() -> AsyncGenerator[AsyncSession, None]:
+        async with session_module.async_session_factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
 
     app.dependency_overrides[get_db_session] = override_get_db_session
 

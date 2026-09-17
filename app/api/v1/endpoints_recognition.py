@@ -132,3 +132,60 @@ async def suggest_line(req: LineSuggestionRequest) -> dict[str, list[dict]]:
                 result[w] = valid_cands
     return result
 
+
+from pydantic import BaseModel, Field
+
+
+class PersonalizationLearnRequest(BaseModel):
+    original: str = Field(..., description="Original OCR transcribed word")
+    corrected: str = Field(..., description="User's intended/corrected word")
+    user_id: str = Field("default", description="Identifier of the writer")
+
+
+@router.post(
+    "/personalization/learn",
+    summary="Record user correction to personalize optical handwriting weights",
+)
+async def learn_personalization(req: PersonalizationLearnRequest) -> dict:
+    """Record manual user edit and calibrate the optical handwriting confusion matrix."""
+    from app.ml.personalization import get_user_profile
+    from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
+
+    profile = get_user_profile(req.user_id)
+    learned = profile.record_correction(req.original, req.corrected)
+    corrector = get_handwriting_confusion_corrector()
+    profile.apply_to_confusion_corrector(corrector)
+
+    return {
+        "status": "learned",
+        "learned_pairs": learned,
+        "stats": profile.get_stats(),
+    }
+
+
+@router.get(
+    "/personalization/profile",
+    summary="Get user handwriting calibration statistics and learned confusions",
+)
+async def get_personalization_profile(user_id: str = "default") -> dict:
+    """Return metrics, top confused letter pairs, and custom words for user profile."""
+    from app.ml.personalization import get_user_profile
+    profile = get_user_profile(user_id)
+    return profile.get_stats()
+
+
+@router.post(
+    "/personalization/reset",
+    summary="Reset user handwriting calibration profile",
+)
+async def reset_personalization_profile(user_id: str = "default") -> dict:
+    """Reset all learned personal handwriting substitutions to factory defaults."""
+    from app.ml.personalization import get_user_profile
+    from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
+    profile = get_user_profile(user_id)
+    profile.reset()
+    corrector = get_handwriting_confusion_corrector()
+    corrector._build_confusion_weights()
+    return {"status": "reset", "user_id": user_id}
+
+

@@ -142,3 +142,38 @@ class BackendAPIClient:
         except Exception:
             return {}
 
+    def learn_personalization(
+        self, original: str, corrected: str, user_id: str = "default"
+    ) -> Dict[str, Any]:
+        """Send manual correction to backend to calibrate user handwriting weights."""
+        try:
+            url = f"{self.base_url}/recognition/personalization/learn"
+            payload = {"original": original, "corrected": corrected, "user_id": user_id}
+            resp = self.session.post(url, json=payload, timeout=5)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+        except Exception:
+            return {}
+
+    def get_personalization_profile(self, user_id: str = "default") -> Dict[str, Any]:
+        """Fetch user handwriting profile metrics and learned substitutions."""
+        try:
+            url = f"{self.base_url}/recognition/personalization/profile"
+            resp = self.session.get(url, params={"user_id": user_id}, timeout=3)
+            if resp.status_code == 200:
+                return resp.json()
+            return {}
+        except Exception:
+            return {}
+
+    def reset_personalization_profile(self, user_id: str = "default") -> bool:
+        """Reset learned user handwriting profile."""
+        try:
+            url = f"{self.base_url}/recognition/personalization/reset"
+            resp = self.session.post(url, params={"user_id": user_id}, timeout=3)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+

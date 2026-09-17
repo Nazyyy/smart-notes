@@ -27,15 +27,19 @@ def get_storage_service() -> StorageService:
 
 @lru_cache()
 def get_inference_engine():
-    """Singleton instance of HTR inference engine (TrOCR Transformer or CRNN fallback)."""
+    """Singleton instance of HTR inference engine (Hybrid Ensemble, TrOCR Transformer, or CRNN)."""
     from app.config import get_settings
     app_settings = get_settings()
     if app_settings.ML_USE_TRANSFORMER and (app_settings.ML_TRANSFORMER_PATH / "model.safetensors").exists():
         try:
-            from app.ml.transformer_engine import TransformerHTREngine
-            return TransformerHTREngine()
+            from app.ml.hybrid_ensemble import HybridEnsembleEngine
+            return HybridEnsembleEngine()
         except Exception:
-            pass
+            try:
+                from app.ml.transformer_engine import TransformerHTREngine
+                return TransformerHTREngine()
+            except Exception:
+                pass
     return CRNNInferenceEngine()
 
 

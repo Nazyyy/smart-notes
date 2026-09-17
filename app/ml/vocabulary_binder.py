@@ -282,8 +282,24 @@ class DomainVocabularyBinder:
 
         return s
 
+    def correct_line_vocabulary(self, text: str) -> str:
+        """Instance method alias for clean_and_bind."""
+        return self.clean_and_bind(text)
+
 
 def postprocess_scientific_and_academic(text: str) -> str:
     """Convenience alias for DomainVocabularyBinder.clean_and_bind."""
     return DomainVocabularyBinder.clean_and_bind(text)
+
+
+_binder_instance: Optional[DomainVocabularyBinder] = None
+
+
+def get_vocabulary_binder() -> DomainVocabularyBinder:
+    """Singleton getter for DomainVocabularyBinder."""
+    global _binder_instance
+    if _binder_instance is None:
+        _binder_instance = DomainVocabularyBinder()
+    return _binder_instance
+
 

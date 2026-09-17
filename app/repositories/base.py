@@ -104,7 +104,7 @@ class BaseRepository(Generic[ModelType]):
         try:
             stmt = delete(self.model).where(self.model.id == entity_id)
             result = await self.session.execute(stmt)
-            await self.session.flush()
+            await self.session.commit()
             return (result.rowcount or 0) > 0
         except Exception as exc:
             logger.error("Failed to delete %s id %s: %s", self.model.__name__, entity_id, exc)

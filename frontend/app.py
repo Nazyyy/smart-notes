@@ -126,6 +126,24 @@ with st.sidebar:
             except Exception as exc:
                 st.error(f"Не удалось удалить документ: {exc}")
 
+    st.divider()
+    st.subheader("🎯 Профиль автора (Калибровка)")
+    calib_enabled = st.checkbox("Адаптация под мой почерк", value=True)
+    if calib_enabled:
+        profile_stats = api_client.get_personalization_profile()
+        if profile_stats:
+            total_c = profile_stats.get("total_corrections", 0)
+            learned_sub = profile_stats.get("learned_substitutions_count", 0)
+            top_pairs = profile_stats.get("top_confusions", [])
+            st.caption(f"✍️ Выучено правок: **{total_c}** | Замен букв: **{learned_sub}**")
+            if top_pairs:
+                pairs_str = ", ".join([f"{p['pair']} ({p['count']}x)" for p in top_pairs[:4]])
+                st.caption(f"Особенности почерка: `{pairs_str}`")
+        if st.button("🔄 Сбросить калибровку", use_container_width=True):
+            api_client.reset_personalization_profile()
+            st.toast("Калибровка сброшена к исходным весам.")
+            st.rerun()
+
 
 # ------------------------------------------------------------------------------
 # MAIN WORKSPACE

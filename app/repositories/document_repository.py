@@ -90,7 +90,7 @@ class DocumentRepository(BaseRepository[Document]):
                 content=content,
             )
             self.session.add(export_entity)
-            await self.session.flush()
+            await self.session.commit()
             await self.session.refresh(export_entity)
             return export_entity
         except Exception as exc:

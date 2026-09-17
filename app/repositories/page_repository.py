@@ -112,7 +112,7 @@ class PageRepository(BaseRepository[Page]):
             if confidence is not None:
                 line.confidence = confidence
 
-            await self.session.flush()
+            await self.session.commit()
             await self.session.refresh(line)
             return line
         except Exception as exc:

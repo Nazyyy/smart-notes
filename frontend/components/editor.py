@@ -135,7 +135,9 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
                                             line_id=line_id,
                                             new_text=updated,
                                         )
-                                        st.success(f"Заменено на «{cand_word}»!")
+                                        # Send correction to adaptive personalization engine
+                                        api_client.learn_personalization(original=orig_word, corrected=cand_word)
+                                        st.success(f"Заменено на «{cand_word}» (калибровка почерка обновлена)!")
                                         st.rerun()
                                     except Exception as exc:
                                         st.error(f"Ошибка: {exc}")
@@ -149,7 +151,15 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
                             line_id=line_id,
                             new_text=new_text,
                         )
-                        st.success("Сохранено!")
+                        # Extract word modifications to calibrate author profile
+                        old_tokens = text.split()
+                        new_tokens = new_text.split()
+                        for ot, nt in zip(old_tokens, new_tokens):
+                            clean_ot = ot.strip(".,;:!?()-\"\'")
+                            clean_nt = nt.strip(".,;:!?()-\"\'")
+                            if clean_ot.lower() != clean_nt.lower() and len(clean_ot) >= 2 and len(clean_nt) >= 2:
+                                api_client.learn_personalization(original=clean_ot, corrected=clean_nt)
+                        st.success("Сохранено (профиль калибровки обновлен)!")
                     except Exception as exc:
                         st.error(f"Ошибка сохранения: {exc}")
 
