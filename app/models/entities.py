@@ -36,6 +36,7 @@ class DocumentStatus(str, Enum):
 class PageStatus(str, Enum):
     """Processing stage status of an individual page."""
     PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
     PREPROCESSED = "PREPROCESSED"
     SEGMENTED = "SEGMENTED"
     COMPLETED = "COMPLETED"

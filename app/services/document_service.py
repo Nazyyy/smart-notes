@@ -80,6 +80,7 @@ class DocumentService:
             status=PageStatus.PENDING.value,
         )
         await self.page_repo.create(page)
+        await self.doc_repo.session.commit()
 
         # Execute or schedule pipeline
         if process_immediately:

@@ -62,18 +62,43 @@ class DocumentProcessingPipeline:
         self,
         document_id: UUID,
         page_id: UUID,
-        doc_repo: DocumentRepository,
-        page_repo: PageRepository,
-        beam_width: int = 5,
+        doc_repo: Optional[DocumentRepository] = None,
+        page_repo: Optional[PageRepository] = None,
+        beam_width: int = 3,
     ) -> Page:
         """
-        Execute full lifecycle pipeline on a page:
+        Execute full lifecycle pipeline on a page with isolated transaction management.
+        """
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from app.db.session import async_session_factory
+        from app.repositories.document_repository import DocumentRepository
+        from app.repositories.page_repository import PageRepository
+
+        session_obj = getattr(doc_repo, "session", None)
+        if doc_repo is None or page_repo is None or isinstance(session_obj, AsyncSession):
+            async with async_session_factory() as dedicated_session:
+                d_repo = DocumentRepository(dedicated_session)
+                p_repo = PageRepository(dedicated_session)
+                return await self._execute_page_pipeline_impl(document_id, page_id, d_repo, p_repo, beam_width)
+        else:
+            return await self._execute_page_pipeline_impl(document_id, page_id, doc_repo, page_repo, beam_width)
+
+    async def _execute_page_pipeline_impl(
+        self,
+        document_id: UUID,
+        page_id: UUID,
+        doc_repo: DocumentRepository,
+        page_repo: PageRepository,
+        beam_width: int = 3,
+    ) -> Page:
+        """
+        Internal implementation of the full lifecycle pipeline on a page:
         1. Read raw image from disk.
         2. Rectify perspective and deskew.
         3. Equalize lighting and suppress shadows.
         4. Binarize ink foreground.
         5. Extract text line bounding boxes via HPP.
-        6. Predict text via PyTorch CRNN.
+        6. Predict text via PyTorch CRNN / TrOCR.
         7. Save debug artifacts and persist line entities.
         8. Auto-generate structured Markdown export.
         """
@@ -81,7 +106,8 @@ class DocumentProcessingPipeline:
 
         # Update document & page status to PROCESSING
         await doc_repo.update_status(document_id, DocumentStatus.PROCESSING)
-        await page_repo.update(page_id, {"status": PageStatus.PENDING.value})
+        await page_repo.update(page_id, {"status": PageStatus.PROCESSING.value})
+        await doc_repo.session.commit()
 
         page = await page_repo.get_by_id(page_id)
         if not page:
@@ -235,6 +261,10 @@ class DocumentProcessingPipeline:
 
         except Exception as exc:
             logger.error("Processing pipeline failed for Document %s, Page %s: %s", document_id, page_id, exc, exc_info=True)
-            await page_repo.update(page_id, {"status": PageStatus.FAILED.value})
-            await doc_repo.update_status(document_id, DocumentStatus.FAILED, error_message=str(exc))
-            raise
+            try:
+                await page_repo.update(page_id, {"status": PageStatus.FAILED.value})
+                await doc_repo.update_status(document_id, DocumentStatus.FAILED, error_message=str(exc))
+                await doc_repo.session.commit()
+            except Exception:
+                pass
+            raise ImageProcessingException("pipeline_execution", str(exc)) from exc

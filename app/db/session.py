@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import event
 from app.config import get_settings
 from app.core.logging import get_logger
 
@@ -26,7 +27,9 @@ class Base(DeclarativeBase):
 
 # Initialize Async Engine with connection pool parameters
 _engine_kwargs = {"echo": settings.DEBUG}
-if not settings.DATABASE_URL.startswith("sqlite"):
+if settings.DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs["connect_args"] = {"timeout": 60}
+else:
     _engine_kwargs.update({
         "pool_size": settings.DATABASE_POOL_SIZE,
         "max_overflow": settings.DATABASE_MAX_OVERFLOW,
@@ -39,6 +42,15 @@ engine: AsyncEngine = create_async_engine(
     settings.DATABASE_URL,
     **_engine_kwargs,
 )
+
+if settings.DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=60000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.close()
 
 # Thread-safe async session factory
 async_session_factory = async_sessionmaker(
