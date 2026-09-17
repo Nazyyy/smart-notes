@@ -145,6 +145,22 @@ class ContextIntelligenceEngine:
                         i += 2
                         continue
 
+                    # 4. General vocabulary-backed hyphenation stitching
+                    elif nxt_words:
+                        combined_word = prefix + nxt_first
+                        from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
+                        from app.ml.language_model_rescorer import get_language_model_rescorer
+                        corrector = get_handwriting_confusion_corrector()
+                        rescorer = get_language_model_rescorer()
+                        if combined_word in corrector.vocabulary or (len(combined_word) >= 6 and rescorer.compute_char_perplexity_penalty(combined_word) == 0.0):
+                            curr = re.sub(r'(\b[\w]+)[\-\.]$', combined_word, curr)
+                            rem = " ".join(nxt_words[1:])
+                            if rem:
+                                curr = curr + " " + rem
+                            stitched.append(curr)
+                            i += 2
+                            continue
+
             stitched.append(curr)
             i += 1
 

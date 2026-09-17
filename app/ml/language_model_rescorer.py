@@ -165,10 +165,10 @@ class NGramLanguageModelRescorer:
             return (avg_log_prob + 9.0) * 2.5
         return 0.0
 
-    def score_sequence(self, text: str) -> float:
+    def score_sequence(self, text: str, prev_context: Optional[str] = None) -> float:
         """
         Compute total Language Model log-likelihood score for a sequence of words.
-        Rewards recognized vocabulary terms and penalizes character gibberish.
+        Incorporates cross-line previous context to score inter-line transitions and word hyphenations.
         """
         if not text or not text.strip():
             return -10.0
@@ -178,15 +178,43 @@ class NGramLanguageModelRescorer:
         if not words:
             return -5.0
 
+        # Extract prior words from preceding line context if available
+        context_words: List[str] = []
+        is_hyphenated_continuation = False
+        hyphen_stem = ""
+
+        if prev_context and prev_context.strip():
+            raw_prev_clean = re.sub(r'[^а-яА-Яa-zA-Z0-9\s\-]', ' ', prev_context.lower())
+            p_words = [pw.strip() for pw in raw_prev_clean.split() if len(pw.strip()) > 0]
+            if p_words:
+                context_words = p_words[-2:]
+                # Detect hyphenation wrap
+                last_token = prev_context.strip().split()[-1]
+                if last_token.endswith("-") or last_token.endswith("."):
+                    hyphen_stem = re.sub(r'[^а-яА-Яa-zA-Z0-9]', '', last_token).lower()
+                    if hyphen_stem:
+                        is_hyphenated_continuation = True
+
         total_score = 0.0
         for i, w in enumerate(words):
-            prev1 = words[i-1] if i > 0 else None
-            prev2 = words[i-2] if i > 1 else None
+            if i == 0 and context_words:
+                prev1 = context_words[-1]
+                prev2 = context_words[-2] if len(context_words) > 1 else None
+            else:
+                prev1 = words[i-1] if i > 0 else None
+                prev2 = words[i-2] if i > 1 else None
+
             word_lp = self.compute_word_log_prob(w, prev1, prev2)
             char_penalty = self.compute_char_perplexity_penalty(w)
 
             # Dictionary bonus for exact vocabulary match
             vocab_bonus = 1.2 if w in self.vocab else 0.0
+
+            # Special reward for completing hyphenated words from previous line
+            if i == 0 and is_hyphenated_continuation:
+                full_compound = hyphen_stem + w
+                if full_compound in self.vocab or (len(full_compound) >= 5 and self.compute_char_perplexity_penalty(full_compound) == 0.0):
+                    vocab_bonus += 3.5
 
             total_score += word_lp + char_penalty + vocab_bonus
 
@@ -195,35 +223,33 @@ class NGramLanguageModelRescorer:
     def rescore_candidates(
         self,
         candidates: List[Tuple[str, float]],
+        prev_context: Optional[str] = None,
         alpha: float = 0.35,
         word_bonus: float = 0.20,
     ) -> str:
         """
-        Rescore Beam Search candidates using:
-        FinalScore(W) = log P_OCR(W) + alpha * log P_LM(W) + word_bonus * len(W_words)
-        Returns the top re-ranked candidate text.
+        Rescore beam search / TTA candidate strings using cross-line language model scores.
         """
         if not candidates:
             return ""
-        if len(candidates) == 1:
+
+        scored_candidates: List[Tuple[float, str]] = []
+        for text, ocr_log_prob in candidates:
+            if not text.strip():
+                continue
+            lm_score = self.score_sequence(text, prev_context=prev_context)
+            n_words = len(text.split())
+            length_bonus = n_words * word_bonus
+
+            # Combined posterior score
+            total = (1.0 - alpha) * ocr_log_prob + alpha * lm_score + length_bonus
+            scored_candidates.append((total, text))
+
+        if not scored_candidates:
             return candidates[0][0]
 
-        best_score = -float('inf')
-        best_text = candidates[0][0]
-
-        for text, ocr_log_prob in candidates:
-            if not text or not text.strip():
-                continue
-
-            lm_score = self.score_sequence(text)
-            n_words = len(text.split())
-            final_score = ocr_log_prob + alpha * lm_score + word_bonus * n_words
-
-            if final_score > best_score:
-                best_score = final_score
-                best_text = text
-
-        return best_text
+        scored_candidates.sort(reverse=True, key=lambda x: x[0])
+        return scored_candidates[0][1]
 
 
 _global_rescorer: Optional[NGramLanguageModelRescorer] = None

@@ -38,6 +38,19 @@ def test_rescore_candidates():
     assert best == "человек биосоциальное существо"
 
 
+def test_cross_line_context_scoring():
+    lm = NGramLanguageModelRescorer()
+    # Context: previous line ends with "теория"
+    score_with_ctx = lm.score_sequence("возникновения человека", prev_context="Антропогенез - теория")
+    score_without_ctx = lm.score_sequence("возникновения человека")
+    assert score_with_ctx > score_without_ctx
+
+    # Hyphenation: previous line ends with "обще-"
+    score_hyphen_match = lm.score_sequence("ства", prev_context="развитие человеческого обще-")
+    score_hyphen_wrong = lm.score_sequence("рыба", prev_context="развитие человеческого обще-")
+    assert score_hyphen_match > score_hyphen_wrong
+
+
 def test_singleton_getter():
     lm1 = get_language_model_rescorer()
     lm2 = get_language_model_rescorer()

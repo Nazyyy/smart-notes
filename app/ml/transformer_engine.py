@@ -96,6 +96,14 @@ class TransformerHTREngine:
             self.model = VisionEncoderDecoderModel.from_pretrained(str(self.model_path))
             self.model.to(self.device)
             self.model.eval()
+
+            if self.device.type == "cuda":
+                try:
+                    torch.backends.cuda.enable_flash_sdp(True)
+                    torch.backends.cuda.enable_mem_efficient_sdp(True)
+                except Exception:
+                    pass
+
             logger.info("TransformerHTREngine loaded successfully on %s.", self.device)
         except Exception as exc:
             logger.error("Failed to load Transformer model from %s: %s", self.model_path, exc)
@@ -103,12 +111,12 @@ class TransformerHTREngine:
 
     def _segment_line_into_spans(self, crop: np.ndarray) -> List[Tuple[np.ndarray, bool]]:
         """
-        Intelligently detect large column gaps (>= 38px of white space) such as
-        two-column notebook tables or date headers.
-        Returns a list of (sub_crop, is_split) tuples. Trims empty margin on the right and left.
+        Intelligently detect large table column gaps (>= 75px or 12% width of white space).
+        Prevents splitting normal sentences into fractured long and short segments.
+        Trims empty paper margins on the left and right.
         """
         h, w = crop.shape[:2]
-        if w <= 100:
+        if w <= 140:
             return [(crop, False)]
 
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
@@ -116,7 +124,10 @@ class TransformerHTREngine:
         clean_crop = suppress_grid_lines(bin_crop)
         vpp = np.sum(clean_crop > 0, axis=0)
 
-        # Detect wide zero/near-zero ink gaps (at least 38px, not at image boundaries)
+        # Minimum gap length and side margins to qualify as genuine multi-column layout
+        min_gap = max(75, int(w * 0.12))
+        min_side_w = max(80, int(w * 0.12))
+
         is_gap = vpp < 2
         split_xs: List[int] = []
         in_gap = False
@@ -129,18 +140,18 @@ class TransformerHTREngine:
             elif not g and in_gap:
                 in_gap = False
                 gap_len = x - gap_start
-                if gap_len >= 38 and gap_start >= 40:
+                if gap_len >= min_gap and gap_start >= min_side_w:
                     ink_left = int(np.sum(clean_crop[:, :gap_start] > 0))
                     ink_right = int(np.sum(clean_crop[:, x:] > 0))
-                    # Only split as column if both sides have genuine text strokes
-                    if (w - x) >= 40 and ink_left >= 90 and ink_right >= 90:
+                    # Only split as column if BOTH sides are genuine substantial text blocks
+                    if (w - x) >= min_side_w and ink_left >= 200 and ink_right >= 200:
                         split_xs.append((gap_start + x) // 2)
-                    elif ink_right < 70:
-                        # Right side is just empty margin paper, trim it!
+                    elif ink_right < 60:
+                        # Right side is just empty paper margin, trim it!
                         crop = crop[:, :gap_start]
                         break
-                    elif ink_left < 70:
-                        # Left side is empty margin paper, trim it!
+                    elif ink_left < 60:
+                        # Left side is empty paper margin, trim it!
                         crop = crop[:, x:]
                         break
 
@@ -152,12 +163,12 @@ class TransformerHTREngine:
         spans: List[Tuple[np.ndarray, bool]] = []
         for b1, b2 in zip(bounds[:-1], bounds[1:]):
             sub_crop = crop[:, b1:b2]
-            if sub_crop.shape[1] >= 20:
+            if sub_crop.shape[1] >= 25:
                 # verify sub_crop has actual ink and contrast
                 g_sub = cv2.cvtColor(sub_crop, cv2.COLOR_BGR2GRAY) if len(sub_crop.shape) == 3 else sub_crop
                 _, b_sub = cv2.threshold(g_sub, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
                 c_sub = suppress_grid_lines(b_sub)
-                if np.sum(c_sub > 0) >= 60 and float(np.std(g_sub)) >= 13.0:
+                if np.sum(c_sub > 0) >= 80 and float(np.std(g_sub)) >= 13.0:
                     spans.append((sub_crop, True))
 
         return spans if spans else [(crop, False)]
@@ -181,43 +192,37 @@ class TransformerHTREngine:
             rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
         return Image.fromarray(rgb)
 
-    def predict_single_line(self, crop: np.ndarray, enable_tta: bool = True) -> Tuple[str, float]:
+    def predict_single_line(
+        self,
+        crop: np.ndarray,
+        enable_tta: bool = True,
+        context_prev_line: Optional[str] = None,
+    ) -> Tuple[str, float]:
         """
         Recognize a single line crop using multi-column span detection,
-        multi-view Test-Time Augmentation (TTA), beam search (num_beams=5),
-        and consensus candidate scoring.
+        Fast-Path Test-Time Augmentation (TTA) with early exit, cross-line context,
+        and N-gram beam rescoring.
         """
         if crop is None or crop.size == 0 or crop.shape[0] < 6 or crop.shape[1] < 6:
             return "", 0.0
 
         spans = self._segment_line_into_spans(crop)
         span_results: List[Tuple[str, float]] = []
+        rescorer = get_language_model_rescorer()
 
         for sub_crop, _ in spans:
             if sub_crop is None or sub_crop.size == 0 or sub_crop.shape[1] < 12:
                 continue
 
-            if enable_tta and sub_crop.shape[1] >= 24:
-                variants = generate_tta_variants(sub_crop)
-                pil_images = [self._prepare_pil_crop(v[1]) for v in variants]
-                pixel_values = self.processor(images=pil_images, return_tensors="pt").pixel_values.to(self.device)
+            # --- Fast-Path: Evaluate primary unaugmented crop first ---
+            pil_primary = self._prepare_pil_crop(sub_crop)
+            pixel_primary = self.processor(images=[pil_primary], return_tensors="pt").pixel_values.to(self.device)
 
-                with torch.no_grad():
-                    if self.device.type == "cuda":
-                        with torch.autocast(device_type="cuda", dtype=torch.float16):
-                            outputs = self.model.generate(
-                                pixel_values,
-                                max_new_tokens=64,
-                                num_beams=5,
-                                repetition_penalty=1.25,
-                                no_repeat_ngram_size=3,
-                                early_stopping=True,
-                                return_dict_in_generate=True,
-                                output_scores=True,
-                            )
-                    else:
+            with torch.no_grad():
+                if self.device.type == "cuda":
+                    with torch.autocast(device_type="cuda", dtype=torch.float16):
                         outputs = self.model.generate(
-                            pixel_values,
+                            pixel_primary,
                             max_new_tokens=64,
                             num_beams=5,
                             repetition_penalty=1.25,
@@ -226,56 +231,61 @@ class TransformerHTREngine:
                             return_dict_in_generate=True,
                             output_scores=True,
                         )
-
-                try:
-                    scores = self.model.compute_transition_scores(
-                        outputs.sequences, outputs.scores, outputs.beam_indices, normalize_logits=True
-                    )
-                except Exception:
-                    scores = None
-
-                raw_texts = self.processor.batch_decode(outputs.sequences, skip_special_tokens=True)
-
-                candidates: dict[str, list[float]] = {}
-                for v_idx, text in enumerate(raw_texts):
-                    conf = 0.85
-                    if scores is not None:
-                        probs = torch.exp(scores[v_idx])
-                        valid_probs = probs[probs > 0]
-                        if len(valid_probs) > 0:
-                            conf = float(valid_probs.mean().item())
-
-                    bound_text = postprocess_scientific_and_academic(text)
-                    if not bound_text:
-                        continue
-                    if bound_text not in candidates:
-                        candidates[bound_text] = []
-                    candidates[bound_text].append(conf)
-
-                if candidates:
-                    scored = []
-                    rescorer = get_language_model_rescorer()
-                    for c_text, conf_list in candidates.items():
-                        words = c_text.split()
-                        length_weight = 1.0 if len(words) >= 3 else (0.75 if len(words) == 2 else 0.4)
-                        consensus_bonus = 0.15 * (len(conf_list) - 1)
-                        mean_conf = float(np.mean(conf_list))
-                        lm_score = rescorer.score_sequence(c_text)
-                        total_score = (mean_conf + consensus_bonus + 0.04 * lm_score) * length_weight
-                        scored.append((total_score, mean_conf, c_text))
-                    scored.sort(reverse=True)
-                    span_results.append((scored[0][2], scored[0][1]))
                 else:
-                    span_results.append(("", 0.0))
-            else:
-                pil_img = self._prepare_pil_crop(sub_crop)
-                pixel_values = self.processor(images=[pil_img], return_tensors="pt").pixel_values.to(self.device)
+                    outputs = self.model.generate(
+                        pixel_primary,
+                        max_new_tokens=64,
+                        num_beams=5,
+                        repetition_penalty=1.25,
+                        no_repeat_ngram_size=3,
+                        early_stopping=True,
+                        return_dict_in_generate=True,
+                        output_scores=True,
+                    )
 
-                with torch.no_grad():
-                    if self.device.type == "cuda":
-                        with torch.autocast(device_type="cuda", dtype=torch.float16):
-                            outputs = self.model.generate(
-                                pixel_values,
+            try:
+                scores = self.model.compute_transition_scores(
+                    outputs.sequences, outputs.scores, outputs.beam_indices, normalize_logits=True
+                )
+                probs = torch.exp(scores[0])
+                valid_probs = probs[probs > 0]
+                primary_conf = float(valid_probs.mean().item()) if len(valid_probs) > 0 else 0.85
+            except Exception:
+                primary_conf = 0.85
+
+            primary_text = self.processor.batch_decode(outputs.sequences, skip_special_tokens=True)[0]
+            bound_primary = postprocess_scientific_and_academic(primary_text)
+
+            # Fast-path early exit: if primary crop has >= 90% confidence, skip remaining TTA variants!
+            if enable_tta and primary_conf >= 0.90 and bound_primary.strip():
+                span_results.append((bound_primary, primary_conf))
+                continue
+
+            # If TTA enabled and confidence < 90%, evaluate multi-view variants
+            if enable_tta and sub_crop.shape[1] >= 24:
+                variants = generate_tta_variants(sub_crop)
+                # Skip variant 0 as we already processed it
+                extra_variants = variants[1:] if len(variants) > 1 else []
+                if extra_variants:
+                    pil_extras = [self._prepare_pil_crop(v[1]) for v in extra_variants]
+                    pixel_extras = self.processor(images=pil_extras, return_tensors="pt").pixel_values.to(self.device)
+
+                    with torch.no_grad():
+                        if self.device.type == "cuda":
+                            with torch.autocast(device_type="cuda", dtype=torch.float16):
+                                extra_outputs = self.model.generate(
+                                    pixel_extras,
+                                    max_new_tokens=64,
+                                    num_beams=3,
+                                    repetition_penalty=1.25,
+                                    no_repeat_ngram_size=3,
+                                    early_stopping=True,
+                                    return_dict_in_generate=True,
+                                    output_scores=True,
+                                )
+                        else:
+                            extra_outputs = self.model.generate(
+                                pixel_extras,
                                 max_new_tokens=64,
                                 num_beams=3,
                                 repetition_penalty=1.25,
@@ -284,28 +294,54 @@ class TransformerHTREngine:
                                 return_dict_in_generate=True,
                                 output_scores=True,
                             )
-                    else:
-                        outputs = self.model.generate(
-                            pixel_values,
-                            max_new_tokens=64,
-                            num_beams=3,
-                            repetition_penalty=1.25,
-                            no_repeat_ngram_size=3,
-                            early_stopping=True,
-                            return_dict_in_generate=True,
-                            output_scores=True,
-                        )
 
-                token_ids = outputs.sequences
-                decoded_candidates = self.processor.batch_decode(token_ids, skip_special_tokens=True)
-                rescorer = get_language_model_rescorer()
-                clean_candidates = [
-                    (postprocess_scientific_and_academic(t), 0.0)
-                    for t in decoded_candidates
-                    if t.strip()
-                ]
-                best_text = rescorer.rescore_candidates(clean_candidates) if clean_candidates else ""
-                span_results.append((best_text, 0.88))
+                    try:
+                        extra_scores = self.model.compute_transition_scores(
+                            extra_outputs.sequences, extra_outputs.scores, extra_outputs.beam_indices, normalize_logits=True
+                        )
+                    except Exception:
+                        extra_scores = None
+
+                    extra_texts = self.processor.batch_decode(extra_outputs.sequences, skip_special_tokens=True)
+                else:
+                    extra_texts = []
+                    extra_scores = None
+
+                candidates: dict[str, list[float]] = {}
+                if bound_primary:
+                    candidates[bound_primary] = [primary_conf]
+
+                for e_idx, e_txt in enumerate(extra_texts):
+                    e_conf = 0.82
+                    if extra_scores is not None:
+                        e_probs = torch.exp(extra_scores[e_idx])
+                        e_val = e_probs[e_probs > 0]
+                        if len(e_val) > 0:
+                            e_conf = float(e_val.mean().item())
+
+                    e_bound = postprocess_scientific_and_academic(e_txt)
+                    if not e_bound:
+                        continue
+                    if e_bound not in candidates:
+                        candidates[e_bound] = []
+                    candidates[e_bound].append(e_conf)
+
+                if candidates:
+                    scored = []
+                    for c_text, conf_list in candidates.items():
+                        words = c_text.split()
+                        length_weight = 1.0 if len(words) >= 3 else (0.75 if len(words) == 2 else 0.4)
+                        consensus_bonus = 0.15 * (len(conf_list) - 1)
+                        mean_conf = float(np.mean(conf_list))
+                        lm_score = rescorer.score_sequence(c_text, prev_context=context_prev_line)
+                        total_score = (mean_conf + consensus_bonus + 0.04 * lm_score) * length_weight
+                        scored.append((total_score, mean_conf, c_text))
+                    scored.sort(reverse=True)
+                    span_results.append((scored[0][2], scored[0][1]))
+                else:
+                    span_results.append(("", 0.0))
+            else:
+                span_results.append((bound_primary, primary_conf))
 
         if not span_results:
             return "", 0.0
@@ -330,15 +366,24 @@ class TransformerHTREngine:
         use_beam_search: bool = True,
     ) -> List[Tuple[str, float]]:
         """
-        Run inference across a batch of line crops.
+        Run sequential inference across a batch of line crops,
+        propagating cross-line linguistic context from each recognized line to the next.
         """
         if not images:
             return []
 
         results: List[Tuple[str, float]] = []
+        last_recognized_text: Optional[str] = None
+
         try:
             for crop in images:
-                text, conf = self.predict_single_line(crop, enable_tta=True)
+                text, conf = self.predict_single_line(
+                    crop,
+                    enable_tta=True,
+                    context_prev_line=last_recognized_text,
+                )
+                if text and text.strip():
+                    last_recognized_text = text.strip()
                 results.append((text, conf))
         except Exception as exc:
             logger.error("Transformer batch prediction failed: %s", exc, exc_info=True)

@@ -1,14 +1,17 @@
 # ### FILE: frontend/components/editor.py
 """
 Interactive Line-by-Line Transcription Editor Component.
-Allows inspecting line crops and correcting OCR transcriptions.
+Allows inspecting line crops, visual highlighting of uncertain words,
+and one-click substitution of high-probability optical cursive candidates.
 """
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+import re
 import streamlit as st
 from PIL import Image
 from frontend.api_client import BackendAPIClient
+from app.ml.handwriting_confusion import get_handwriting_confusion_corrector
 
 
 def render_confidence_indicator(confidence: float) -> str:
@@ -16,22 +19,47 @@ def render_confidence_indicator(confidence: float) -> str:
     pct = int(confidence * 100)
     if confidence >= 0.80:
         color = "#10b981"
-    elif confidence >= 0.50:
+        status = "высокая"
+    elif confidence >= 0.55:
         color = "#f59e0b"
+        status = "средняя"
     else:
         color = "#ef4444"
-    return f'<span style="color: {color}; font-weight: 600;">{pct}% уверенность</span>'
+        status = "требует проверки"
+    return f'<span style="color: {color}; font-weight: 600; font-size: 0.9em;">● {pct}% уверенность ({status})</span>'
+
+
+def render_highlighted_preview(text: str, uncertain_words: List[str]) -> str:
+    """Render text with low-confidence / ambiguous words highlighted in gold marker."""
+    if not text:
+        return ""
+    words = text.split()
+    html_parts = []
+    uncertain_set = set(w.lower().strip(".,;:!?()-\"\'") for w in uncertain_words)
+
+    for w in words:
+        clean = w.lower().strip(".,;:!?()-\"\'")
+        if clean in uncertain_set:
+            html_parts.append(
+                f'<span style="background-color: #fef08a; color: #854d0e; padding: 2px 6px; '
+                f'border-radius: 4px; font-weight: 600; border: 1px dashed #eab308;" title="Потенциальная оптическая ошибка">{w}</span>'
+            )
+        else:
+            html_parts.append(f"<span>{w}</span>")
+
+    return " ".join(html_parts)
 
 
 def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> None:
     """Render interactive card-based list of lines for review and correction."""
-    st.subheader("✏️ Построчный редактор распознавания")
+    st.subheader("✏️ Построчный редактор с матрицей подсказок")
 
     lines: List[Dict[str, Any]] = page.get("lines", [])
     if not lines:
         st.info("Сегментированные строки на странице отсутствуют.")
         return
 
+    corrector = get_handwriting_confusion_corrector()
     st.markdown(f"Всего обнаружено строк: **{len(lines)}**")
 
     for line in lines:
@@ -40,6 +68,25 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
         text = line.get("recognized_text", "")
         conf = float(line.get("confidence", 0.0))
         crop_path_str = line.get("cropped_image_path")
+
+        # Key for this line input
+        input_key = f"line_input_{line_id}"
+        if input_key not in st.session_state:
+            st.session_state[input_key] = text
+
+        current_val = st.session_state[input_key]
+        words = [w.strip(".,;:!?()-\"\'") for w in current_val.split() if len(w.strip(".,;:!?()-\"\'")) >= 3]
+
+        # Identify uncertain words and calculate optical alternatives
+        uncertain_words_with_cands: Dict[str, List[Dict[str, Any]]] = {}
+        for w in words:
+            clean_lower = w.lower()
+            if clean_lower not in corrector.vocabulary or conf < 0.85:
+                cands = corrector.get_word_candidates(w, context_words=words, top_k=3)
+                # Only offer suggestions if candidate differs from original word
+                valid_cands = [c for c in cands if c["word"].lower() != clean_lower]
+                if valid_cands:
+                    uncertain_words_with_cands[w] = valid_cands
 
         with st.container():
             col_crop, col_edit, col_btn = st.columns([4, 6, 2])
@@ -56,12 +103,45 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
 
             with col_edit:
                 st.markdown(render_confidence_indicator(conf), unsafe_allow_html=True)
+
+                if uncertain_words_with_cands:
+                    highlighted_html = render_highlighted_preview(current_val, list(uncertain_words_with_cands.keys()))
+                    st.markdown(
+                        f'<div style="margin-bottom: 6px; font-size: 0.95em;">{highlighted_html}</div>',
+                        unsafe_allow_html=True,
+                    )
+
                 new_text = st.text_input(
                     label=f"Текст строки #{line_idx}",
-                    value=text,
-                    key=f"line_input_{line_id}",
+                    value=st.session_state[input_key],
+                    key=input_key,
                     label_visibility="collapsed",
                 )
+
+                # Render one-click suggestion chips for uncertain words
+                if uncertain_words_with_cands:
+                    st.caption("💡 Быстрые подсказки матрицы почерка:")
+                    for orig_word, cands in uncertain_words_with_cands.items():
+                        c_cols = st.columns(len(cands))
+                        for c_idx, cand_info in enumerate(cands):
+                            cand_word = cand_info["word"]
+                            with c_cols[c_idx]:
+                                btn_label = f'"{orig_word}" ➔ {cand_word}'
+                                if st.button(btn_label, key=f"btn_sug_{line_id}_{orig_word}_{c_idx}"):
+                                    # Substitute candidate word
+                                    pattern = re.compile(re.escape(orig_word), re.IGNORECASE)
+                                    updated = pattern.sub(cand_word, st.session_state[input_key], count=1)
+                                    st.session_state[input_key] = updated
+                                    try:
+                                        api_client.update_line_text(
+                                            page_id=page["id"],
+                                            line_id=line_id,
+                                            new_text=updated,
+                                        )
+                                        st.success(f"Заменено на «{cand_word}»!")
+                                        st.rerun()
+                                    except Exception as exc:
+                                        st.error(f"Ошибка: {exc}")
 
             with col_btn:
                 st.write("")  # Vertical alignment spacer
