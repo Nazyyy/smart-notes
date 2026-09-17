@@ -78,52 +78,17 @@ class NoteStructurerService:
     ) -> str:
         """
         Compile sorted page lines into a clean, GitHub-flavored Markdown document
-        complete with headings, math blocks, and list hierarchies.
+        complete with domain classification, hyphenation stitching, and table structures.
         """
         if not lines:
             return f"# {document_title}\n\n*(Документ не содержит распознанного текста)*\n"
 
-        # Calculate layout statistics
-        heights = [line.bbox_h for line in lines if line.bbox_h > 0]
-        avg_h = float(sum(heights) / len(heights)) if heights else 20.0
+        from app.services.context_intelligence import ContextIntelligenceEngine
+        raw_texts = [line.recognized_text.strip() for line in lines if line.recognized_text and line.recognized_text.strip()]
+        if not raw_texts:
+            return f"# {document_title}\n\n*(Документ не содержит распознанного текста)*\n"
 
-        xs = [line.bbox_x for line in lines]
-        min_x = min(xs) if xs else 0
-
-        md_output: List[str] = [f"# {document_title}\n"]
-
-        for line in lines:
-            text = line.recognized_text.strip()
-            if not text:
-                continue
-
-            block_type, _ = self.classify_line(text, line.bbox_w, line.bbox_h, avg_h)
-            indent = self.calculate_indentation(line.bbox_x, min_x)
-            indent_prefix = "  " * indent
-
-            # Normalize OCR artifacts in numbering and prefixes
-            text = re.sub(r"^(2002|202)\s*", "2. ", text)
-            text = re.sub(r"^М\.З\.\s*", "3. ", text)
-
-            if block_type == "h1":
-                clean_title = re.sub(r"^#+\s*", "", text)
-                clean_title = re.sub(r"^\d+\s+(?=[А-ЯA-Z])", "", clean_title)
-                md_output.append(f"\n## {clean_title}\n")
-            elif block_type == "h2":
-                clean_title = re.sub(r"^#+\s*", "", text)
-                md_output.append(f"\n### {clean_title}\n")
-            elif block_type == "math":
-                # Ensure LaTeX math formatting
-                clean_math = text.strip("$ ")
-                md_output.append(f"\n$$\n{clean_math}\n$$\n")
-            elif block_type == "bullet":
-                clean_item = re.sub(r"^[\-\*•–—\d\.\)]+\s*", "", text)
-                clean_item = re.sub(r"^[\.\,\-\–—\s]+", "", clean_item).strip()
-                md_output.append(f"{indent_prefix}- {clean_item}")
-            else:
-                md_output.append(f"{indent_prefix}{text}\n")
-
-        return "\n".join(md_output).strip() + "\n"
+        return ContextIntelligenceEngine.structure_into_markdown(raw_texts, document_title)
 
     def structure_lines_to_plaintext(
         self,

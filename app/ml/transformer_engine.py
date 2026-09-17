@@ -25,6 +25,7 @@ settings = get_settings()
 
 from app.ml.vocabulary_binder import DomainVocabularyBinder
 from app.cv.enhancer import generate_tta_variants
+from app.cv.segmentation import suppress_grid_lines
 
 
 def postprocess_scientific_and_academic(text: str) -> str:
@@ -102,7 +103,7 @@ class TransformerHTREngine:
         """
         Intelligently detect large column gaps (>= 38px of white space) such as
         two-column notebook tables or date headers.
-        Returns a list of (sub_crop, is_split) tuples. Trims empty margin on the right.
+        Returns a list of (sub_crop, is_split) tuples. Trims empty margin on the right and left.
         """
         h, w = crop.shape[:2]
         if w <= 100:
@@ -110,7 +111,8 @@ class TransformerHTREngine:
 
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if len(crop.shape) == 3 else crop
         _, bin_crop = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        vpp = np.sum(bin_crop > 0, axis=0)
+        clean_crop = suppress_grid_lines(bin_crop)
+        vpp = np.sum(clean_crop > 0, axis=0)
 
         # Detect wide zero/near-zero ink gaps (at least 38px, not at image boundaries)
         is_gap = vpp < 2
@@ -126,14 +128,18 @@ class TransformerHTREngine:
                 in_gap = False
                 gap_len = x - gap_start
                 if gap_len >= 38 and gap_start >= 40:
-                    ink_left = int(np.sum(bin_crop[:, :gap_start] > 0))
-                    ink_right = int(np.sum(bin_crop[:, x:] > 0))
-                    # Only split as column if both sides have real text
-                    if (w - x) >= 40 and ink_left >= 60 and ink_right >= 60:
+                    ink_left = int(np.sum(clean_crop[:, :gap_start] > 0))
+                    ink_right = int(np.sum(clean_crop[:, x:] > 0))
+                    # Only split as column if both sides have genuine text strokes
+                    if (w - x) >= 40 and ink_left >= 90 and ink_right >= 90:
                         split_xs.append((gap_start + x) // 2)
-                    elif ink_right < 60:
+                    elif ink_right < 70:
                         # Right side is just empty margin paper, trim it!
                         crop = crop[:, :gap_start]
+                        break
+                    elif ink_left < 70:
+                        # Left side is empty margin paper, trim it!
+                        crop = crop[:, x:]
                         break
 
         if not split_xs:
@@ -144,8 +150,13 @@ class TransformerHTREngine:
         spans: List[Tuple[np.ndarray, bool]] = []
         for b1, b2 in zip(bounds[:-1], bounds[1:]):
             sub_crop = crop[:, b1:b2]
-            if sub_crop.shape[1] >= 16:
-                spans.append((sub_crop, True))
+            if sub_crop.shape[1] >= 20:
+                # verify sub_crop has actual ink and contrast
+                g_sub = cv2.cvtColor(sub_crop, cv2.COLOR_BGR2GRAY) if len(sub_crop.shape) == 3 else sub_crop
+                _, b_sub = cv2.threshold(g_sub, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                c_sub = suppress_grid_lines(b_sub)
+                if np.sum(c_sub > 0) >= 60 and float(np.std(g_sub)) >= 13.0:
+                    spans.append((sub_crop, True))
 
         return spans if spans else [(crop, False)]
 
@@ -196,6 +207,9 @@ class TransformerHTREngine:
                                 pixel_values,
                                 max_new_tokens=64,
                                 num_beams=5,
+                                repetition_penalty=1.25,
+                                no_repeat_ngram_size=3,
+                                early_stopping=True,
                                 return_dict_in_generate=True,
                                 output_scores=True,
                             )
@@ -204,6 +218,9 @@ class TransformerHTREngine:
                             pixel_values,
                             max_new_tokens=64,
                             num_beams=5,
+                            repetition_penalty=1.25,
+                            no_repeat_ngram_size=3,
+                            early_stopping=True,
                             return_dict_in_generate=True,
                             output_scores=True,
                         )
@@ -256,6 +273,9 @@ class TransformerHTREngine:
                                 pixel_values,
                                 max_new_tokens=64,
                                 num_beams=3,
+                                repetition_penalty=1.25,
+                                no_repeat_ngram_size=3,
+                                early_stopping=True,
                                 return_dict_in_generate=True,
                                 output_scores=True,
                             )
@@ -264,6 +284,9 @@ class TransformerHTREngine:
                             pixel_values,
                             max_new_tokens=64,
                             num_beams=3,
+                            repetition_penalty=1.25,
+                            no_repeat_ngram_size=3,
+                            early_stopping=True,
                             return_dict_in_generate=True,
                             output_scores=True,
                         )

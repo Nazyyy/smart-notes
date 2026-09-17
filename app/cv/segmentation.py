@@ -207,22 +207,40 @@ def calculate_line_horizontal_bounds(
 ) -> Tuple[int, int]:
     """
     Determine tight text bounds, ignoring checkered notebook grid lines and isolated margin specks.
-    Preserves initial numbering, bullets, and trailing punctuation.
+    Clusters active ink columns and filters out distant margin dust.
     """
     clean = suppress_grid_lines(binary_slice)
     clean = remove_vertical_ruling_artifacts(clean)
-    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
+    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)))
     vpp = np.sum(clean > 0, axis=0)
     solid_cols = np.where(vpp >= min_content_threshold)[0]
     if len(solid_cols) == 0:
         return 0, binary_slice.shape[1]
 
-    x1 = int(solid_cols[0])
-    x2 = int(solid_cols[-1])
+    # Cluster active columns by inter-word distance
+    clusters = []
+    c_start = int(solid_cols[0])
+    c_prev = int(solid_cols[0])
+    for c in solid_cols[1:]:
+        if c - c_prev > 45:
+            clusters.append((c_start, c_prev))
+            c_start = int(c)
+        c_prev = int(c)
+    clusters.append((c_start, c_prev))
 
-    # Generous safety padding so outer strokes, digits, and punctuation are never truncated
-    x1 = max(0, x1 - 12)
-    x2 = min(binary_slice.shape[1], x2 + 14)
+    # Prune tiny isolated dust clusters (< 8px width and < 25 total ink)
+    valid_clusters = []
+    for s, e in clusters:
+        cw = e - s + 1
+        c_ink = int(np.sum(clean[:, s:e + 1] > 0))
+        if cw >= 8 and c_ink >= 25:
+            valid_clusters.append((s, e))
+
+    if not valid_clusters:
+        return int(solid_cols[0]), int(solid_cols[-1])
+
+    x1 = max(0, valid_clusters[0][0] - 12)
+    x2 = min(binary_slice.shape[1], valid_clusters[-1][1] + 14)
     return x1, x2
 
 
@@ -239,14 +257,36 @@ def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     clean = suppress_grid_lines(otsu)
     clean = remove_vertical_ruling_artifacts(clean)
-    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2)))
+    clean = cv2.morphologyEx(clean, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2)))
 
     vpp = np.sum(clean > 0, axis=0)
     cols = np.where(vpp >= 3)[0]
     if len(cols) == 0:
         return crop, 0
 
-    x1, x2 = int(cols[0]), int(cols[-1])
+    # Cluster active columns
+    clusters = []
+    c_start = int(cols[0])
+    c_prev = int(cols[0])
+    for c in cols[1:]:
+        if c - c_prev > 45:
+            clusters.append((c_start, c_prev))
+            c_start = int(c)
+        c_prev = int(c)
+    clusters.append((c_start, c_prev))
+
+    valid_clusters = []
+    for s, e in clusters:
+        cw = e - s + 1
+        c_ink = int(np.sum(clean[:, s:e + 1] > 0))
+        if cw >= 8 and c_ink >= 25:
+            valid_clusters.append((s, e))
+
+    if not valid_clusters:
+        x1, x2 = int(cols[0]), int(cols[-1])
+    else:
+        x1 = valid_clusters[0][0]
+        x2 = valid_clusters[-1][1]
 
     pad_left = max(0, x1 - 10)
     pad_right = min(crop.shape[1], x2 + 12)
@@ -305,6 +345,10 @@ def segment_text_lines(
             i += 1
 
         for y1, y2 in merged_intervals:
+            # Drop bottom table border/shadow artifact (spans bottom 8% of page with huge width)
+            if y2 >= img_h - 10 and y1 >= img_h - 80:
+                continue
+
             h_line = y2 - y1
             # Add adaptive vertical padding so ascenders and descenders aren't clipped
             pad = max(padding, int(h_line * 0.12))
