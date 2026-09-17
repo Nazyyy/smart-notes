@@ -14,7 +14,7 @@ DEFAULT_BACKEND_URL = os.getenv("BACKEND_API_URL", "http://127.0.0.1:8000/api/v1
 class BackendAPIClient:
     """Client for synchronous communication between Streamlit UI and FastAPI Backend."""
 
-    def __init__(self, base_url: str = DEFAULT_BACKEND_URL, timeout: int = 60) -> None:
+    def __init__(self, base_url: str = DEFAULT_BACKEND_URL, timeout: int = 180) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
@@ -24,9 +24,11 @@ class BackendAPIClient:
         try:
             # Note health check is mounted on root, not /api/v1
             root_url = self.base_url.replace("/api/v1", "")
-            resp = self.session.get(f"{root_url}/health", timeout=5)
+            resp = self.session.get(f"{root_url}/health", timeout=10)
             resp.raise_for_status()
             return resp.json()
+        except requests.exceptions.Timeout:
+            return {"status": "busy", "message": "Сервер выполняет нейросетевую обработку..."}
         except Exception as exc:
             return {"status": "unreachable", "error": str(exc)}
 

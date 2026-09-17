@@ -50,6 +50,8 @@ with st.sidebar:
     if health.get("status") == "healthy":
         device_label = f"Device: {health.get('device', 'cpu').upper()}"
         st.caption(f"🟢 Сервер API активен ({device_label})")
+    elif health.get("status") == "busy":
+        st.info("⏳ Сервер выполняет ресурсоемкое распознавание конспекта...")
     else:
         st.error(f"🔴 Ошибка связи с API сервером ({health.get('error', 'unreachable')})")
 

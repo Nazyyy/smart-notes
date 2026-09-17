@@ -231,7 +231,7 @@ class TransformerHTREngine:
                         outputs = self.model.generate(
                             pixel_primary,
                             max_new_tokens=64,
-                            num_beams=5,
+                            num_beams=3,
                             repetition_penalty=1.25,
                             no_repeat_ngram_size=3,
                             early_stopping=True,
@@ -242,7 +242,7 @@ class TransformerHTREngine:
                     outputs = self.model.generate(
                         pixel_primary,
                         max_new_tokens=64,
-                        num_beams=5,
+                        num_beams=3,
                         repetition_penalty=1.25,
                         no_repeat_ngram_size=3,
                         early_stopping=True,
@@ -263,8 +263,8 @@ class TransformerHTREngine:
             primary_text = self.processor.batch_decode(outputs.sequences, skip_special_tokens=True)[0]
             bound_primary = postprocess_scientific_and_academic(primary_text)
 
-            # Fast-path early exit: if primary crop has >= 90% confidence, skip remaining TTA variants!
-            if enable_tta and primary_conf >= 0.90 and bound_primary.strip():
+            # Fast-path early exit: if primary crop has >= 82% confidence, skip remaining TTA variants!
+            if enable_tta and primary_conf >= 0.82 and bound_primary.strip():
                 span_results.append((bound_primary, primary_conf))
                 continue
 
@@ -382,8 +382,9 @@ class TransformerHTREngine:
         results: List[Tuple[str, float]] = []
         last_recognized_text: Optional[str] = None
 
+        total_crops = len(images)
         try:
-            for crop in images:
+            for idx, crop in enumerate(images):
                 text, conf = self.predict_single_line(
                     crop,
                     enable_tta=True,
@@ -392,6 +393,13 @@ class TransformerHTREngine:
                 if text and text.strip():
                     last_recognized_text = text.strip()
                 results.append((text, conf))
+                logger.info(
+                    "Recognized line %d/%d (%.1f%%): %s",
+                    idx + 1,
+                    total_crops,
+                    conf * 100,
+                    (text[:45] + "...") if len(text) > 45 else text,
+                )
         except Exception as exc:
             logger.error("Transformer batch prediction failed: %s", exc, exc_info=True)
             raise ModelInferenceException(f"Transformer batch prediction failed: {exc}") from exc

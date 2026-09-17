@@ -5,6 +5,7 @@ Orchestrates CV rectification, shadow removal, HPP segmentation, CRNN inference,
 and database persistence.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Tuple
 from uuid import UUID
@@ -107,28 +108,35 @@ class DocumentProcessingPipeline:
                 new_w, new_h = int(orig_w * scale), int(orig_h * scale)
                 raw_bgr = cv2.resize(raw_bgr, (new_w, new_h), interpolation=cv2.INTER_AREA)
 
-            # 2. Rectify perspective and deskew
-            rectified_bgr, skew_angle = rectify_document_geometry(raw_bgr)
+            # 2-5. Computer Vision: Rectification, Shadow suppression, Binarization & Line Segmentation
+            def _run_cv_pipeline(img: np.ndarray):
+                rect_img, angle = rectify_document_geometry(img)
+                shadow_img = suppress_shadows_and_denoise(rect_img)
+                g = cv2.cvtColor(shadow_img, cv2.COLOR_BGR2GRAY)
+                b_mask = adaptive_binarize(g)
+                box_list, crop_list, hpp_proj = segment_text_lines(rect_img, b_mask)
+                return rect_img, angle, shadow_img, b_mask, box_list, crop_list, hpp_proj
+
+            (
+                rectified_bgr,
+                skew_angle,
+                shadow_suppressed,
+                binary_mask,
+                bboxes,
+                crops,
+                hpp,
+            ) = await asyncio.to_thread(_run_cv_pipeline, raw_bgr)
             rect_h, rect_w = rectified_bgr.shape[:2]
 
-            # 3. Suppress shadows and normalize lighting
-            shadow_suppressed = suppress_shadows_and_denoise(rectified_bgr)
-            gray = cv2.cvtColor(shadow_suppressed, cv2.COLOR_BGR2GRAY)
-
-            # 4. Adaptive binarization
-            binary_mask = adaptive_binarize(gray)
-
-            # 5. Line segmentation via HPP
-            bboxes, crops, hpp = segment_text_lines(rectified_bgr, binary_mask)
-
-            # 6. ML Recognition (CRNN + CTC)
+            # 6. ML Recognition (TrOCR / CRNN) run in thread pool
             transcriptions: List[str] = []
             confidences: List[float] = []
 
             if crops:
-                # Use beam search if configured
-                predictions = self.inference_engine.predict_batch(
-                    crops, use_beam_search=(beam_width > 1)
+                predictions = await asyncio.to_thread(
+                    self.inference_engine.predict_batch,
+                    crops,
+                    (beam_width > 1),
                 )
                 for text, conf in predictions:
                     transcriptions.append(text)
@@ -136,7 +144,8 @@ class DocumentProcessingPipeline:
 
             # 7. Persist debug artifacts
             debug_dir = self.storage_service.get_page_debug_directory(document_id, page_id)
-            save_pipeline_debug_artifacts(
+            await asyncio.to_thread(
+                save_pipeline_debug_artifacts,
                 debug_dir=debug_dir,
                 raw_image=raw_bgr,
                 rectified_image=rectified_bgr,
