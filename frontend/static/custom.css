@@ -1,0 +1,104 @@
+/* ### FILE: frontend/static/custom.css */
+/* Modern Dark & Neon Emerald Theme for Smart Notes */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+    --bg-main: #0e1117;
+    --bg-card: #161b22;
+    --border-color: #30363d;
+    --primary-accent: #10b981;
+    --primary-hover: #059669;
+    --text-primary: #f0f6fc;
+    --text-muted: #8b949e;
+    --badge-bg: #064e3b;
+    --badge-border: #10b981;
+}
+
+body, .stApp {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background-color: var(--bg-main);
+    color: var(--text-primary);
+}
+
+/* Custom Header Hero */
+.smart-notes-hero {
+    background: linear-gradient(135deg, #0d2818 0%, #041f1e 50%, #0c1824 100%);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.smart-notes-title {
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: #ecfdf5;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.smart-notes-subtitle {
+    font-size: 1.05rem;
+    color: #a7f3d0;
+    margin-top: 6px;
+}
+
+/* Status Badges */
+.badge-completed {
+    background-color: #064e3b;
+    color: #34d399;
+    border: 1px solid #059669;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.badge-processing {
+    background-color: #451a03;
+    color: #fbbf24;
+    border: 1px solid #d97706;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.badge-failed {
+    background-color: #450a0a;
+    color: #f87171;
+    border: 1px solid #dc2626;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* Line Editor Card */
+.line-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 12px;
+    transition: border-color 0.2s;
+}
+
+.line-card:hover {
+    border-color: var(--primary-accent);
+}
+
+/* Code block typography */
+pre, code {
+    font-family: 'JetBrains Mono', monospace !important;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}

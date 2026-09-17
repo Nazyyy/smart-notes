@@ -1,0 +1,42 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Environment configurations and secrets
+.env
+.env.local
+*.env
+
+# SQLite local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Large ML Weights, Datasets, and Local Storage
+data/weights/*
+!data/weights/.gitkeep
+data/datasets/*
+!data/datasets/.gitkeep
+data/processed_htr/*
+data/storage/*
+!data/storage/.gitkeep
+data/dictionary/*
+*.incomplete
+
+# Temporary test scripts
+scripts/test_*.py
+
+# OS metadata
+.DS_Store
+Thumbs.db

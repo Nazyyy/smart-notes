@@ -1,0 +1,24 @@
+# ### FILE: docker/.dockerignore
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+.git/
+.gitignore
+.DS_Store
+.idea/
+.vscode/
+data/storage/*
+!data/storage/.gitkeep
+data/weights/*
+!data/weights/.gitkeep

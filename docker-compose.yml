@@ -1,0 +1,100 @@
+# ### FILE: docker-compose.yml
+# ==============================================================================
+# SMART NOTES - PRODUCTION DOCKER COMPOSE STACK
+# Orchestrates PostgreSQL, FastAPI Backend, and Streamlit Frontend
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: smart_notes_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: smart_notes_user
+      POSTGRES_PASSWORD: smart_notes_secret_password_2026
+      POSTGRES_DB: smart_notes_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smart_notes_user -d smart_notes_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - smart_notes_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: smart_notes_backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ENVIRONMENT: production
+      DEBUG: "false"
+      LOG_LEVEL: INFO
+      HOST: 0.0.0.0
+      PORT: 8000
+      DATABASE_URL: postgresql+asyncpg://smart_notes_user:smart_notes_secret_password_2026@postgres:5432/smart_notes_db
+      STORAGE_ROOT: /app/data/storage
+      ML_MODEL_WEIGHTS_PATH: /app/data/weights/crnn_htr_weights.pt
+      ML_DEVICE: cpu
+      ML_BATCH_SIZE: 16
+      ML_BEAM_WIDTH: 5
+    ports:
+      - "8000:8000"
+    volumes:
+      - storage_data:/app/data/storage
+      - weights_data:/app/data/weights
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - smart_notes_network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    container_name: smart_notes_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BACKEND_API_URL: http://backend:8000/api/v1
+    ports:
+      - "8501:8501"
+    volumes:
+      - storage_data:/app/data/storage:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8501/_stcore/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - smart_notes_network
+
+volumes:
+  postgres_data:
+    driver: local
+  storage_data:
+    driver: local
+  weights_data:
+    driver: local
+
+networks:
+  smart_notes_network:
+    driver: bridge
