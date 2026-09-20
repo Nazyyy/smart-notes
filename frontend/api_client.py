@@ -37,6 +37,7 @@ class BackendAPIClient:
         title: str,
         file_bytes: bytes,
         filename: str,
+        author: str = "default",
         description: Optional[str] = None,
         async_background: bool = False,
     ) -> Dict[str, Any]:
@@ -45,6 +46,7 @@ class BackendAPIClient:
         files = {"file": (filename, file_bytes, "image/jpeg")}
         data = {
             "title": title,
+            "author": author,
             "description": description or "",
             "process_immediately": "true",
             "async_background": "true" if async_background else "false",
@@ -53,10 +55,14 @@ class BackendAPIClient:
         resp.raise_for_status()
         return resp.json()
 
-    def list_documents(self, limit: int = 50, offset: int = 0) -> Dict[str, Any]:
+    def list_documents(
+        self, limit: int = 50, offset: int = 0, author: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Fetch list of uploaded documents."""
         url = f"{self.base_url}/documents"
-        params = {"limit": limit, "offset": offset}
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
+        if author:
+            params["author"] = author
         resp = self.session.get(url, params=params, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json()
@@ -105,12 +111,61 @@ class BackendAPIClient:
         resp.raise_for_status()
         return resp.json()
 
+    def synthesize_ai_study_guide(
+        self,
+        document_id: str,
+        provider: str = "openrouter",
+        model: str = "nex-agi/nex-n2.5-pro:free",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        length_mode: str = "medium",
+        enrich_facts: bool = False,
+        creativity_mode: str = "strict",
+    ) -> Dict[str, Any]:
+        """Synthesize deep, beautifully structured academic study guide using LLM with customization."""
+        url = f"{self.base_url}/documents/{document_id}/export/ai-synthesize"
+        payload = {
+            "export_format": "MARKDOWN",
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "length_mode": length_mode,
+            "enrich_facts": enrich_facts,
+            "creativity_mode": creativity_mode,
+        }
+        resp = self.session.post(url, json=payload, timeout=180)
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_interactive_kit(
+        self,
+        document_id: str,
+        provider: str = "openrouter",
+        model: str = "nex-agi/nex-n2.5-pro:free",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate or retrieve interactive study kit (flashcards, cloze tests, quiz)."""
+        url = f"{self.base_url}/documents/{document_id}/interactive-kit"
+        payload = {
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+        }
+        resp = self.session.post(url, json=payload, timeout=180)
+        resp.raise_for_status()
+        return resp.json()
+
+
     def download_export(self, document_id: str, export_format: str = "MARKDOWN") -> str:
         """Download raw export text content."""
         url = f"{self.base_url}/documents/{document_id}/export/{export_format}/download"
         resp = self.session.get(url, timeout=self.timeout)
         resp.raise_for_status()
         return resp.text
+
 
     def get_word_suggestions(
         self, word: str, context: Optional[str] = None, top_k: int = 3
@@ -175,5 +230,66 @@ class BackendAPIClient:
             return resp.status_code == 200
         except Exception:
             return False
+
+    def list_users(self) -> List[Dict[str, Any]]:
+        """Fetch list of all handwriting profiles."""
+        try:
+            url = f"{self.base_url}/recognition/personalization/users"
+            resp = self.session.get(url, timeout=3)
+            if resp.status_code == 200:
+                return resp.json()
+            return []
+        except Exception:
+            return []
+
+    def create_user(self, user_name: str, display_name: Optional[str] = None) -> Dict[str, Any]:
+        """Create a new handwriting user profile."""
+        url = f"{self.base_url}/recognition/personalization/users"
+        payload = {"user_name": user_name, "display_name": display_name}
+        resp = self.session.post(url, json=payload, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+
+    def correct_page_with_llm(
+        self,
+        page_id: str,
+        provider: str = "openrouter",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: str = "nex-agi/nex-n2.5-pro:free",
+        user_id: str = "default",
+    ) -> Dict[str, Any]:
+        """Trigger full-page contextual correction using LLM or offline NLP."""
+        url = f"{self.base_url}/recognition/llm/correct"
+        payload = {
+            "page_id": page_id,
+            "provider": provider,
+            "api_key": api_key,
+            "base_url": base_url,
+            "model": model,
+            "user_id": user_id,
+        }
+        resp = self.session.post(url, json=payload, timeout=300)
+        resp.raise_for_status()
+        return resp.json()
+
+    def apply_llm_corrections(
+        self,
+        page_id: str,
+        corrections: List[Dict[str, Any]],
+        user_id: str = "default",
+    ) -> Dict[str, Any]:
+        """Commit LLM corrections to database and calibration profile."""
+        url = f"{self.base_url}/recognition/llm/apply"
+        payload = {
+            "page_id": page_id,
+            "user_id": user_id,
+            "corrections": corrections,
+        }
+        resp = self.session.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        return resp.json()
+
+
 
 

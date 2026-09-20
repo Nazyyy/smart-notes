@@ -17,13 +17,28 @@ from app.ml.handwriting_confusion import HandwritingConfusionCorrector, get_hand
 logger = get_logger(__name__)
 
 
+import re
+
+
+def sanitize_user_id(name: str) -> str:
+    """Sanitize user name into safe filesystem identifier."""
+    cleaned = re.sub(r"[^\w\-]", "_", name.strip(), flags=re.UNICODE).lower()
+    cleaned = re.sub(r"_+", "_", cleaned).strip("_")
+    return cleaned if cleaned else "user"
+
+
 class UserPersonalizationProfile:
     """
     Stores and persists a specific user's handwriting calibration profile.
     """
 
-    def __init__(self, user_id: str = "default", storage_dir: Optional[Path] = None) -> None:
-        self.user_id = user_id
+    def __init__(
+        self,
+        user_id: str = "default",
+        display_name: Optional[str] = None,
+        storage_dir: Optional[Path] = None,
+    ) -> None:
+        self.user_id = sanitize_user_id(user_id)
         if storage_dir is None:
             self.storage_dir = Path(__file__).resolve().parent.parent.parent / "data" / "user_profiles"
         else:
@@ -32,10 +47,19 @@ class UserPersonalizationProfile:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         self.profile_path = self.storage_dir / f"{self.user_id}.json"
 
+        # Default display name
+        if display_name:
+            self.display_name = display_name
+        elif self.user_id == "default":
+            self.display_name = "Основной пользователь"
+        else:
+            self.display_name = user_id
+
         # State
         self.character_confusions: Dict[str, int] = {}  # key: "a->b", val: count
         self.custom_vocabulary: Set[str] = set()
         self.total_corrections: int = 0
+        self.created_at: str = datetime.utcnow().isoformat()
         self.last_updated_at: Optional[str] = None
 
         self.load()
@@ -49,9 +73,11 @@ class UserPersonalizationProfile:
             with open(self.profile_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
+            self.display_name = data.get("display_name", self.display_name)
             self.character_confusions = data.get("character_confusions", {})
             self.custom_vocabulary = set(data.get("custom_vocabulary", []))
             self.total_corrections = data.get("total_corrections", 0)
+            self.created_at = data.get("created_at", self.created_at)
             self.last_updated_at = data.get("last_updated_at")
             logger.info("Loaded handwriting profile '%s' (%d corrections)", self.user_id, self.total_corrections)
         except Exception as exc:
@@ -61,7 +87,9 @@ class UserPersonalizationProfile:
         """Save profile to disk."""
         data = {
             "user_id": self.user_id,
+            "display_name": self.display_name,
             "total_corrections": self.total_corrections,
+            "created_at": self.created_at,
             "last_updated_at": datetime.utcnow().isoformat(),
             "character_confusions": self.character_confusions,
             "custom_vocabulary": sorted(list(self.custom_vocabulary)),
@@ -144,11 +172,13 @@ class UserPersonalizationProfile:
 
         return {
             "user_id": self.user_id,
+            "display_name": self.display_name,
             "total_corrections": self.total_corrections,
             "learned_substitutions_count": len(self.character_confusions),
             "custom_words_count": len(self.custom_vocabulary),
             "top_confusions": top_confusions,
             "last_updated_at": self.last_updated_at,
+            "created_at": self.created_at,
         }
 
 
@@ -156,8 +186,53 @@ class UserPersonalizationProfile:
 _profiles: Dict[str, UserPersonalizationProfile] = {}
 
 
-def get_user_profile(user_id: str = "default") -> UserPersonalizationProfile:
+def get_user_profile(
+    user_id: str = "default",
+    display_name: Optional[str] = None,
+    storage_dir: Optional[Path] = None,
+) -> UserPersonalizationProfile:
     """Retrieve or create a singleton personalization profile for user_id."""
-    if user_id not in _profiles:
-        _profiles[user_id] = UserPersonalizationProfile(user_id=user_id)
-    return _profiles[user_id]
+    clean_id = sanitize_user_id(user_id)
+    cache_key = f"{clean_id}_{str(storage_dir)}" if storage_dir else clean_id
+    if cache_key not in _profiles:
+        _profiles[cache_key] = UserPersonalizationProfile(
+            user_id=clean_id, display_name=display_name, storage_dir=storage_dir
+        )
+    return _profiles[cache_key]
+
+
+def list_all_profiles(storage_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """List all available user profiles stored on disk."""
+    if storage_dir is None:
+        storage_dir = Path(__file__).resolve().parent.parent.parent / "data" / "user_profiles"
+    else:
+        storage_dir = Path(storage_dir)
+
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    profiles_meta: List[Dict[str, Any]] = []
+
+    # Ensure default profile exists in the specified storage_dir
+    default_prof = get_user_profile("default", display_name="Основной пользователь", storage_dir=storage_dir)
+    if not default_prof.profile_path.exists():
+        default_prof.save()
+
+    for p_file in storage_dir.glob("*.json"):
+        u_id = p_file.stem
+        prof = get_user_profile(u_id, storage_dir=storage_dir)
+        profiles_meta.append(prof.get_stats())
+
+    profiles_meta.sort(key=lambda x: (x["user_id"] != "default", x["display_name"].lower()))
+    return profiles_meta
+
+
+def create_user_profile(
+    user_name: str, display_name: Optional[str] = None, storage_dir: Optional[Path] = None
+) -> UserPersonalizationProfile:
+    """Create a new user personalization profile."""
+    clean_id = sanitize_user_id(user_name)
+    disp = display_name or user_name
+    prof = UserPersonalizationProfile(user_id=clean_id, display_name=disp, storage_dir=storage_dir)
+    prof.save()
+    cache_key = f"{clean_id}_{str(storage_dir)}" if storage_dir else clean_id
+    _profiles[cache_key] = prof
+    return prof

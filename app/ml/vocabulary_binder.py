@@ -6,7 +6,7 @@ and scientific vocabularies (Biology, Pharmacology, Chemistry, Linguistics, Soci
 Filters out autoregressive hallucination artifacts (isolated single letters, debris).
 """
 
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Set
 import re
 import difflib
 
@@ -293,6 +293,7 @@ def postprocess_scientific_and_academic(text: str) -> str:
 
 
 _binder_instance: Optional[DomainVocabularyBinder] = None
+_RUSSIAN_LEXICON: Optional[Set[str]] = None
 
 
 def get_vocabulary_binder() -> DomainVocabularyBinder:
@@ -301,5 +302,64 @@ def get_vocabulary_binder() -> DomainVocabularyBinder:
     if _binder_instance is None:
         _binder_instance = DomainVocabularyBinder()
     return _binder_instance
+
+
+def get_russian_lexicon() -> Set[str]:
+    """Retrieve full 1.5M Russian word lexicon for validation and confidence calibration."""
+    global _RUSSIAN_LEXICON
+    if _RUSSIAN_LEXICON is None:
+        from pathlib import Path
+        dict_path = Path("data/dictionary/russian_words.txt")
+        if not dict_path.exists():
+            dict_path = Path(__file__).resolve().parent.parent.parent / "data/dictionary/russian_words.txt"
+        if dict_path.exists():
+            with open(dict_path, "r", encoding="utf-8", errors="ignore") as f:
+                _RUSSIAN_LEXICON = set(line.strip().lower() for line in f if line.strip())
+        else:
+            _RUSSIAN_LEXICON = set()
+    return _RUSSIAN_LEXICON
+
+
+def calibrate_line_confidence(text: str, raw_conf: float) -> float:
+    """
+    Calibrate raw neural OCR confidence score using dictionary verification and entropy checks.
+    Honestly penalizes out-of-vocabulary gibberish, hallucinated dot patterns, and perpendicular artifacts.
+    """
+    cleaned = text.strip()
+    if not cleaned:
+        return 0.0
+
+    words = [w.strip(".,;:!?()-\"\'") for w in cleaned.split() if w.strip(".,;:!?()-\"\'")]
+    if not words:
+        return float(max(0.10, min(0.35, raw_conf * 0.4)))
+
+    lexicon = get_russian_lexicon()
+    valid_words = 0
+    for w in words:
+        wl = w.lower()
+        if wl in lexicon or w.isdigit() or len(w) == 1:
+            valid_words += 1
+        elif len(wl) >= 3 and any(ch in "$=+-_^{}()\\/" for ch in w):
+            valid_words += 1
+
+    lexicon_ratio = valid_words / max(1, len(words))
+
+    junk_penalty = 0.0
+    if "|" in cleaned or "/" in cleaned or "\\" in cleaned:
+        junk_penalty += 0.15
+    if "II." in cleaned or "I." in cleaned:
+        junk_penalty += 0.15
+
+    dot_count = cleaned.count(".")
+    if dot_count >= 3 and len(words) >= 3 and (dot_count / len(words)) > 0.35:
+        junk_penalty += 0.20
+
+    # If almost all words are non-lexicon gibberish, heavy penalty
+    if lexicon_ratio < 0.4:
+        junk_penalty += 0.25
+
+    calibrated = (raw_conf * 0.25) + (raw_conf * 0.75 * lexicon_ratio) - junk_penalty
+    import numpy as np
+    return float(np.clip(calibrated, 0.10, 0.99))
 
 

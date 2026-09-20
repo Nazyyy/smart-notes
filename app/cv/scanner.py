@@ -117,28 +117,100 @@ def detect_document_contour(image: np.ndarray) -> Optional[np.ndarray]:
     return None
 
 
-def calculate_skew_angle(binary_image: np.ndarray) -> float:
+def calculate_skew_angle(
+    binary_image: np.ndarray,
+    source_image: Optional[np.ndarray] = None,
+) -> float:
     """
     Determine dominant skew angle of handwritten text lines in degrees.
-    Uses cv2.minAreaRect on foreground pixel coordinates.
+    Uses multi-stage detection:
+    1. Probabilistic Hough Transform on horizontal text baselines and ruled edges.
+    2. Fallback to Horizontal Projection Profile variance optimization (Radon).
+    3. Fallback to cv2.minAreaRect with correct (X, Y) point ordering.
     """
-    # Foreground pixels are 255
-    coords = np.column_stack(np.where(binary_image > 0))
-    if len(coords) < 100:
+    # 1. Primary Strategy: Hough Lines on source image or binary image
+    target_img = source_image if source_image is not None else binary_image
+    gray = cv2.cvtColor(target_img, cv2.COLOR_BGR2GRAY) if target_img.ndim == 3 else target_img
+
+    edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=70, minLineLength=60, maxLineGap=15)
+
+    if lines is not None and len(lines) >= 8:
+        hough_angles: List[float] = []
+        for l in lines:
+            x1, y1, x2, y2 = l[0]
+            deg = float(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
+            if deg > 90.0:
+                deg -= 180.0
+            elif deg < -90.0:
+                deg += 180.0
+            # Keep plausible horizontal orientations within [-25°, +25°]
+            if -25.0 < deg < 25.0:
+                hough_angles.append(deg)
+
+        if len(hough_angles) >= 6:
+            med_angle = float(np.median(hough_angles))
+            logger.info(
+                "Detected document skew via Hough lines: %.2f° (from %d line segments)",
+                med_angle,
+                len(hough_angles),
+            )
+            return med_angle
+
+    # 2. Secondary Strategy: Projection Profile Variance (Radon-like sweep)
+    # Require substantial foreground ink content to compute meaningful variance
+    if binary_image is not None and np.count_nonzero(binary_image > 0) < 100:
         return 0.0
 
-    angle = cv2.minAreaRect(coords)[-1]
+    try:
+        bin_for_sweep = binary_image if binary_image is not None else cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 10
+        )
+        if np.count_nonzero(bin_for_sweep > 0) < 100:
+            return 0.0
+        # Downscale for fast angular sweep
+        target_w = 480
+        aspect = bin_for_sweep.shape[0] / max(1, bin_for_sweep.shape[1])
+        target_h = int(target_w * aspect)
+        small_bin = cv2.resize(bin_for_sweep, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
 
-    # Adjust angle semantics
-    if angle < -45:
-        angle = -(90 + angle)
-    elif angle > 45:
-        angle = 90 - angle
+        sw_h, sw_w = small_bin.shape[:2]
+        center = (sw_w // 2, sw_h // 2)
+        best_angle = 0.0
+        max_var = -1.0
+
+        for candidate_angle in np.arange(-10.0, 10.0, 0.5):
+            M = cv2.getRotationMatrix2D(center, float(candidate_angle), 1.0)
+            rot = cv2.warpAffine(small_bin, M, (sw_w, sw_h), flags=cv2.INTER_NEAREST)
+            hpp = np.sum(rot > 0, axis=1)
+            var = float(np.var(hpp))
+            if var > max_var:
+                max_var = var
+                best_angle = float(candidate_angle)
+
+        if abs(best_angle) >= 0.2:
+            logger.info("Detected document skew via HPP variance: %.2f°", best_angle)
+            return best_angle
+    except Exception as exc:
+        logger.debug("Projection profile variance sweep skipped: %s", exc)
+
+    # 3. Fallback Strategy: minAreaRect with correct (X, Y) coordinate ordering
+    y_idx, x_idx = np.where(binary_image > 0)
+    if len(x_idx) < 100:
+        return 0.0
+
+    pts_xy = np.column_stack([x_idx, y_idx]).astype(np.float32)
+    rect = cv2.minAreaRect(pts_xy)
+    box_w, box_h = rect[1]
+    angle = rect[2]
+
+    # OpenCV 4.5+ angle normalization
+    if box_w < box_h:
+        angle = angle - 90.0 if angle >= 45.0 else angle
     else:
-        angle = -angle
+        angle = angle if angle < 45.0 else angle - 90.0
 
-    # Filter out extreme false angles (> 45 deg)
-    if abs(angle) > 45.0:
+    if abs(angle) > 30.0:
         return 0.0
 
     return float(angle)
@@ -181,7 +253,7 @@ def rectify_document_geometry(image: np.ndarray) -> Tuple[np.ndarray, float]:
     """
     Full optical rectification pipeline:
     1. Detect page quad and warp perspective if detected.
-    2. Estimate skew angle and rotate to horizontal baseline.
+    2. Estimate skew angle via multi-strategy analysis and rotate to horizontal baseline.
     Returns: (rectified_bgr_image, skew_angle_degrees)
     """
     try:
@@ -192,9 +264,10 @@ def rectify_document_geometry(image: np.ndarray) -> Tuple[np.ndarray, float]:
         gray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY) if len(warped.shape) == 3 else warped.copy()
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-        skew_angle = calculate_skew_angle(binary)
+        skew_angle = calculate_skew_angle(binary, source_image=warped)
         rectified = rotate_image(warped, skew_angle)
 
+        logger.info("Rectification completed: applied rotation of %.2f°", skew_angle)
         return rectified, skew_angle
 
     except Exception as exc:

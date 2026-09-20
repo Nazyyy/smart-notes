@@ -6,7 +6,7 @@ Uses Pydantic Settings for strict typing, defaults, and validation.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,6 +38,28 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:8000",
     ]
+
+    # OpenRouter & Cloud LLM Configuration
+    OPENROUTER_API_KEY: str = Field(
+        default="",
+        description="OpenRouter API Key for cloud LLM contextual correction"
+    )
+    OPENROUTER_DEFAULT_MODEL: str = Field(
+        default="nex-agi/nex-n2.5-pro:free",
+        description="Default OpenRouter model for contextual notes correction"
+    )
+    LLM_PROVIDER: str = Field(
+        default="openrouter",
+        description="Default intelligence provider: 'openrouter', 'ollama', 'heuristic'"
+    )
+    LLM_MODEL: str = Field(
+        default="nex-agi/nex-n2.5-pro:free",
+        description="Default LLM model name"
+    )
+    LLM_BASE_URL: Optional[str] = Field(
+        default=None,
+        description="Optional custom API base URL for LLM provider"
+    )
 
     # Database Configuration
     POSTGRES_USER: str = "smart_notes_user"

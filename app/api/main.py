@@ -41,6 +41,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         logger.warning("Postgres schema init deferred or failed (continuing startup): %s", exc)
 
+    # 4. Pre-warm inference engine (TrOCR/CRNN) so first user upload is instant
+    try:
+        from app.api.dependencies import get_inference_engine
+        engine = get_inference_engine()
+        logger.info("Inference engine pre-warmed: %s", type(engine).__name__)
+    except Exception as eng_exc:
+        logger.warning("Inference engine pre-warming deferred: %s", eng_exc)
+
     logger.info("Application startup sequence complete.")
     yield
 

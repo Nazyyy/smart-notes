@@ -6,6 +6,7 @@ and database persistence.
 """
 
 import asyncio
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple
 from uuid import UUID
@@ -158,17 +159,55 @@ class DocumentProcessingPipeline:
             transcriptions: List[str] = []
             confidences: List[float] = []
 
+            from app.ml.vocabulary_binder import calibrate_line_confidence
+
             if crops:
                 predictions = await asyncio.to_thread(
                     self.inference_engine.predict_batch,
                     crops,
                     (beam_width > 1),
                 )
-                for text, conf in predictions:
-                    transcriptions.append(text)
-                    confidences.append(conf)
+                for raw_text, raw_conf in predictions:
+                    cal_conf = calibrate_line_confidence(raw_text, raw_conf)
+                    transcriptions.append(raw_text)
+                    confidences.append(cal_conf)
 
-            # 7. Persist debug artifacts
+            # 6b. Semantic & Contextual Correction (Heuristic NLP + LLM)
+            from app.ml.llm_context_corrector import LLMContextCorrector, LLMProviderConfig
+
+            raw_transcriptions = list(transcriptions)
+            corrected_transcriptions = list(transcriptions)
+            corrector_info = "без коррекции"
+
+            if crops and transcriptions:
+                corrector = LLMContextCorrector()
+                doc_entity = await doc_repo.get_by_id(document_id)
+                author_id = getattr(doc_entity, "author", "default") or "default"
+
+                lines_payload = [
+                    {"line_index": i, "text": t, "confidence": c}
+                    for i, (t, c) in enumerate(zip(transcriptions, confidences))
+                ]
+
+                # Run fast sub-second morphological NLP correction (1.52M Russian dictionary)
+                heur_cfg = LLMProviderConfig(provider="heuristic")
+
+                try:
+                    corr_res = await corrector.correct_page_lines(
+                        lines_payload, config=heur_cfg, user_id=author_id
+                    )
+                    corrector_info = "Офлайн NLP эвристика (1.52M академический словарь)"
+                    for item in corr_res.get("lines", []):
+                        l_idx = item.get("line_index")
+                        if l_idx is not None and 0 <= l_idx < len(corrected_transcriptions):
+                            new_t = item.get("corrected_text")
+                            if new_t and new_t.strip():
+                                corrected_transcriptions[l_idx] = new_t.strip()
+                    logger.info("Fast NLP correction completed via %s", corrector_info)
+                except Exception as exc:
+                    logger.warning("Fast NLP correction skipped due to error: %s", exc)
+
+            # 7. Persist debug artifacts and pipeline log
             debug_dir = self.storage_service.get_page_debug_directory(document_id, page_id)
             await asyncio.to_thread(
                 save_pipeline_debug_artifacts,
@@ -180,21 +219,49 @@ class DocumentProcessingPipeline:
                 hpp=hpp,
                 bboxes=bboxes,
                 crops=crops,
-                transcriptions=transcriptions,
+                transcriptions=corrected_transcriptions,
                 confidences=confidences,
             )
+
+            # Write structured pipeline execution log
+            log_entries = [
+                f"[{datetime.now().strftime('%H:%M:%S')}] Инициализация конвейера для документа {document_id}",
+                f"[{datetime.now().strftime('%H:%M:%S')}] Исходное разрешение: {orig_w}x{orig_h} px",
+                f"[{datetime.now().strftime('%H:%M:%S')}] Оптическое выравнивание: угол наклона {skew_angle:.2f}° (компенсирован поворот листа)",
+                f"[{datetime.now().strftime('%H:%M:%S')}] Освещение: билатеральное подавление градиентных теней и адаптивная бинаризация Саволы (k=0.22, r=128)",
+                f"[{datetime.now().strftime('%H:%M:%S')}] Сегментация: обнаружено {len(bboxes)} горизонтальных строк текста (без диагонального среза)",
+                f"[{datetime.now().strftime('%H:%M:%S')}] Интеллектуальный корректор: {corrector_info}",
+            ]
+            for idx, (bx, by, bw, bh) in enumerate(bboxes[:25]):
+                raw_t = raw_transcriptions[idx] if idx < len(raw_transcriptions) else ""
+                corr_t = corrected_transcriptions[idx] if idx < len(corrected_transcriptions) else ""
+                cnf = confidences[idx] if idx < len(confidences) else 0.0
+                log_entries.append(
+                    f"  • Строка {idx:02d}: x={bx}, y={by}, {bw}x{bh} px | Conf={cnf*100:.1f}%\n"
+                    f"     [Raw]: \"{raw_t[:60]}\"\n"
+                    f"     [Fix]: \"{corr_t[:60]}\""
+                )
+            if len(bboxes) > 25:
+                log_entries.append(f"  • ... и еще {len(bboxes) - 25} строк")
+
+            avg_conf = (sum(confidences) / len(confidences) * 100) if confidences else 0.0
+            log_entries.append(f"[{datetime.now().strftime('%H:%M:%S')}] Оптическое распознавание завершено. Средняя калиброванная уверенность: {avg_conf:.1f}%")
+
+            pipeline_log_path = debug_dir / "00_pipeline.log"
+            pipeline_log_path.write_text("\n".join(log_entries), encoding="utf-8")
 
             # 8. Create and persist TextLine database records
             line_entities: List[TextLine] = []
             line_counter = 0
             for idx, (x, y, w, h) in enumerate(bboxes):
-                text = transcriptions[idx] if idx < len(transcriptions) else ""
+                raw_text = raw_transcriptions[idx] if idx < len(raw_transcriptions) else ""
+                corr_text = corrected_transcriptions[idx] if idx < len(corrected_transcriptions) else raw_text
                 conf = confidences[idx] if idx < len(confidences) else 0.0
                 crop_rel_path = str(debug_dir / "lines" / f"line_{idx:03d}.jpg")
 
                 # Skip empty or uninformative noise lines
-                alnum_content = "".join(c for c in text if c.isalnum())
-                if not text.strip() or (len(alnum_content) <= 1 and not text.strip().isdigit()):
+                alnum_content = "".join(c for c in corr_text if c.isalnum())
+                if not corr_text.strip() or (len(alnum_content) <= 1 and not corr_text.strip().isdigit()):
                     continue
 
                 line_entities.append(
@@ -206,7 +273,8 @@ class DocumentProcessingPipeline:
                         bbox_w=w,
                         bbox_h=h,
                         cropped_image_path=crop_rel_path,
-                        recognized_text=text,
+                        original_raw_text=raw_text,
+                        recognized_text=corr_text,
                         confidence=conf,
                     )
                 )

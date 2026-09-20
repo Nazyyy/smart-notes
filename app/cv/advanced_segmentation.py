@@ -22,8 +22,8 @@ def compute_energy_map(
     and white space has near-zero energy.
     """
     energy = np.zeros_like(binary, dtype=np.float32)
-    # 1. High penalty for direct ink pixels
-    energy[binary > 0] += 255.0
+    # 1. Heavy penalty for direct ink pixels so seam routes around letters
+    energy[binary > 0] += 1000.0
 
     # 2. Gradient magnitude penalty around stroke edges
     if gray is not None:
@@ -35,7 +35,7 @@ def compute_energy_map(
         # Morphological gradient of binary
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         dilated = cv2.dilate(binary, kernel, iterations=1)
-        energy[dilated > 0] += 50.0
+        energy[dilated > 0] += 150.0
 
     return energy
 
@@ -112,12 +112,17 @@ def compute_line_seams(
     seams: List[np.ndarray] = []
 
     for i in range(len(line_intervals) - 1):
-        _, cur_bottom = line_intervals[i]
-        next_top, _ = line_intervals[i + 1]
+        cur_top, cur_bottom = line_intervals[i]
+        next_top, next_bottom = line_intervals[i + 1]
 
-        # Search band around the boundary
+        cur_h = max(10, cur_bottom - cur_top)
+        next_h = max(10, next_bottom - next_top)
+        avg_h = (cur_h + next_h) / 2.0
+
+        # Search band around the boundary between line i and line i+1
         mid = (cur_bottom + next_top) // 2
-        band_size = max(10, abs(next_top - cur_bottom) + 12)
+        overlap_gap = abs(next_top - cur_bottom)
+        band_size = max(24, int(avg_h * 0.50) + overlap_gap)
         y_min = max(0, mid - band_size // 2)
         y_max = min(h - 1, mid + band_size // 2)
 
@@ -136,10 +141,13 @@ def extract_seam_carved_crop(
     y2: int,
     x1: int,
     x2: int,
+    background_color: Tuple[int, int, int] = (255, 255, 255),
 ) -> np.ndarray:
     """
-    Extract line crop bounded by non-linear top and bottom seams.
-    Masks out any foreign ink crossing the seam boundary to pure background.
+    Extract line crop with clean, intact handwriting boundaries.
+    Preserves all character loops, ascenders, and descenders while masking out
+    adjacent line bleeds (descenders of previous line, ascenders of next line)
+    with clean paper background to prevent stray vertical stroke artifacts.
     """
     h, w = image.shape[:2]
     x1 = max(0, x1)
@@ -148,28 +156,27 @@ def extract_seam_carved_crop(
     y2 = min(h, y2)
 
     if x2 <= x1 or y2 <= y1:
-        return np.full((32, 100, 3), 255, dtype=np.uint8)
+        return np.full((32, 100, 3) if image.ndim == 3 else (32, 100), 255, dtype=np.uint8)
 
     crop = image[y1:y2, x1:x2].copy()
     crop_h, crop_w = crop.shape[:2]
 
-    # Apply top seam mask if foreign descenders overlap
-    if top_seam is not None:
-        sub_top = top_seam[x1:x2] - y1
-        for col in range(crop_w):
-            cut_row = sub_top[col]
-            if 0 < cut_row < crop_h:
-                # Mask pixels above seam to white/background
-                crop[:cut_row, col] = 255
+    # Vectorized masking against boundary seams
+    y_grid = np.arange(crop_h)[:, np.newaxis]  # shape (crop_h, 1)
+    mask = np.zeros((crop_h, crop_w), dtype=bool)
 
-    # Apply bottom seam mask if foreign ascenders overlap
+    if top_seam is not None:
+        seam_top_crop = (top_seam[x1:x2] - y1)[np.newaxis, :]  # shape (1, crop_w)
+        mask |= (y_grid < seam_top_crop)
+
     if bottom_seam is not None:
-        sub_bottom = bottom_seam[x1:x2] - y1
-        for col in range(crop_w):
-            cut_row = sub_bottom[col]
-            if 0 <= cut_row < crop_h:
-                # Mask pixels below seam to white/background
-                crop[cut_row:, col] = 255
+        seam_bottom_crop = (bottom_seam[x1:x2] - y1)[np.newaxis, :]  # shape (1, crop_w)
+        mask |= (y_grid >= seam_bottom_crop)
+
+    if crop.ndim == 3:
+        crop[mask] = background_color
+    else:
+        crop[mask] = 255
 
     return crop
 
@@ -178,25 +185,26 @@ def straighten_text_line(crop: np.ndarray) -> np.ndarray:
     """
     Straighten slightly curved or tilted line using ink moment angle estimation.
     """
-    if crop is None or crop.size == 0 or crop.shape[0] < 10 or crop.shape[1] < 20:
+    if crop is None or crop.size == 0 or crop.shape[0] < 14 or crop.shape[1] < 30:
         return crop
 
     gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop.ndim == 3 else crop
-    # Invert binary: text is 255
     _, bin_inv = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    coords = np.column_stack(np.where(bin_inv > 0))
-    if len(coords) < 50:
+    y_idx, x_idx = np.where(bin_inv > 0)
+    if len(x_idx) < 50:
         return crop
 
-    # Fit line through foreground stroke coordinates
-    try:
-        vx, vy, x0, y0 = cv2.fitLine(coords, cv2.DIST_L2, 0, 0.01, 0.01)
-        angle_rad = np.arctan2(vx, vy)
-        angle_deg = np.degrees(angle_rad) - 90.0
+    # Order points as (x, y)
+    pts_xy = np.column_stack([x_idx, y_idx]).astype(np.float32)
 
-        # Only correct moderate slants within [-12°, +12°] to avoid flipping
-        if -12.0 <= angle_deg <= 12.0 and abs(angle_deg) > 0.75:
+    try:
+        vx, vy, x0, y0 = cv2.fitLine(pts_xy, cv2.DIST_L2, 0, 0.01, 0.01)
+        angle_rad = np.arctan2(float(vy), float(vx))
+        angle_deg = float(np.degrees(angle_rad))
+
+        # Only correct moderate micro-slants within [-8°, +8°]
+        if -8.0 <= angle_deg <= 8.0 and abs(angle_deg) > 0.75:
             h, w = crop.shape[:2]
             center = (w // 2, h // 2)
             M = cv2.getRotationMatrix2D(center, angle_deg, 1.0)

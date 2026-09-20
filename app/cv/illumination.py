@@ -76,34 +76,82 @@ def suppress_shadows_and_denoise(image: np.ndarray) -> np.ndarray:
         raise ImageProcessingException(step="suppress_shadows_and_denoise", reason=str(exc)) from exc
 
 
+def sauvola_threshold(
+    gray: np.ndarray,
+    window_size: int = 35,
+    k: float = 0.22,
+    r: float = 128.0,
+) -> np.ndarray:
+    """
+    Sauvola Binarization: The gold standard adaptive thresholding algorithm
+    for degraded manuscripts, uneven phone camera shadows, and varied pen ink.
+    Calculates O(1) local mean and standard deviation per pixel using cv2.boxFilter.
+    Formula: T(x, y) = m(x, y) * [1 + k * (s(x, y) / R - 1)]
+    """
+    if window_size % 2 == 0:
+        window_size += 1
+
+    gray_f = gray.astype(np.float32)
+    # Local mean via uniform box filter
+    mean = cv2.boxFilter(
+        gray_f, ddepth=-1, ksize=(window_size, window_size), borderType=cv2.BORDER_REFLECT
+    )
+    # Local mean of squares
+    sq_mean = cv2.boxFilter(
+        gray_f * gray_f, ddepth=-1, ksize=(window_size, window_size), borderType=cv2.BORDER_REFLECT
+    )
+    # Local variance: Var = E[X^2] - (E[X])^2
+    variance = np.maximum(0.0, sq_mean - (mean * mean))
+    std_dev = np.sqrt(variance)
+
+    # Sauvola threshold map
+    threshold_map = mean * (1.0 + k * ((std_dev / r) - 1.0))
+
+    # Ink is darker than background (gray_f < threshold_map) -> foreground = 255
+    binary = np.where(gray_f < threshold_map, 255, 0).astype(np.uint8)
+    return binary
+
+
 def adaptive_binarize(gray: np.ndarray) -> np.ndarray:
     """
     Produce high-contrast binary mask where ink text is 255 (foreground)
     and paper background is 0 (background).
+    Combines division normalization and Sauvola adaptive thresholding.
     """
     try:
-        # Morphological illumination correction
-        normalized = remove_non_uniform_lighting(gray, kernel_size=41)
+        if gray is None or gray.size == 0:
+            return gray
+        if gray.ndim == 3:
+            gray = cv2.cvtColor(gray, cv2.COLOR_BGR2GRAY)
 
-        # Adaptive Gaussian thresholding
+        # 1. Morphological illumination division normalization
+        normalized = remove_non_uniform_lighting(gray, kernel_size=45)
+        if normalized.ndim == 3:
+            normalized = cv2.cvtColor(normalized, cv2.COLOR_BGR2GRAY)
+
+        # 2. Fast Sauvola local adaptive thresholding
+        binary_sauvola = sauvola_threshold(normalized, window_size=35, k=0.22, r=128.0)
+
+        # 3. Adaptive Gaussian thresholding for subtle stroke junctions
         binary_adapt = cv2.adaptiveThreshold(
             normalized,
             255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV,
             blockSize=31,
-            C=11,
+            C=10,
         )
 
-        # Otsu thresholding as baseline
+        # 4. Otsu thresholding as broad sanity check
         _, binary_otsu = cv2.threshold(
             normalized, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
         )
 
-        # Bitwise combination: captures fine strokes while rejecting large dark blobs
-        combined = cv2.bitwise_and(binary_adapt, binary_otsu)
+        # Blend Sauvola with adaptive Gaussian: Sauvola eliminates shadow blobs while
+        # keeping delicate cursive loops
+        combined = cv2.bitwise_or(binary_sauvola, cv2.bitwise_and(binary_adapt, binary_otsu))
 
-        # Clean noise: remove isolated 1-pixel specks
+        # 5. Clean noise: remove isolated 1-pixel salt-and-pepper specks
         clean_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         cleaned = cv2.morphologyEx(combined, cv2.MORPH_OPEN, clean_kernel)
 
@@ -112,3 +160,4 @@ def adaptive_binarize(gray: np.ndarray) -> np.ndarray:
     except Exception as exc:
         logger.error("Adaptive binarization failed: %s", exc)
         raise ImageProcessingException(step="adaptive_binarize", reason=str(exc)) from exc
+

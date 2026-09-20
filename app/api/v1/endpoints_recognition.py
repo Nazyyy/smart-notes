@@ -3,6 +3,7 @@
 Recognition Pipeline Trigger and Status Monitoring Endpoints.
 """
 
+from typing import Optional, List, Dict, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, BackgroundTasks, Body
 from app.api.dependencies import (
@@ -187,5 +188,126 @@ async def reset_personalization_profile(user_id: str = "default") -> dict:
     corrector = get_handwriting_confusion_corrector()
     corrector._build_confusion_weights()
     return {"status": "reset", "user_id": user_id}
+
+
+class CreateUserRequest(BaseModel):
+    user_name: Optional[str] = Field(None, min_length=1, max_length=64, description="User identifier or login")
+    user_id: Optional[str] = Field(None, min_length=1, max_length=64, description="User identifier alias")
+    display_name: Optional[str] = Field(None, max_length=128, description="Human-readable display name")
+
+
+@router.get(
+    "/personalization/users",
+    summary="List all registered handwriting user profiles",
+)
+async def list_personalization_users() -> list[dict]:
+    """Retrieve list of all created user profiles with their calibration statistics."""
+    from app.ml.personalization import list_all_profiles
+    return list_all_profiles()
+
+
+@router.post(
+    "/personalization/users",
+    summary="Create a new user handwriting profile",
+)
+async def create_user_profile_endpoint(req: CreateUserRequest) -> dict:
+    """Create a new distinct profile for a writer to isolate their handwriting habits."""
+    from app.ml.personalization import create_user_profile
+    identifier = req.user_name or req.user_id or "user"
+    profile = create_user_profile(user_name=identifier, display_name=req.display_name)
+    return profile.get_stats()
+
+
+class LLMCorrectPageRequest(BaseModel):
+    page_id: UUID = Field(..., description="ID of page whose lines should be contextually corrected")
+    provider: str = Field("openrouter", description="LLM provider: openrouter, ollama, openai, heuristic, custom")
+    api_key: Optional[str] = Field(None, description="API key for external LLM")
+    base_url: Optional[str] = Field(None, description="Custom API base URL")
+    model: str = Field("nex-agi/nex-n2.5-pro:free", description="Model name")
+    temperature: float = Field(0.1, ge=0.0, le=1.0)
+    user_id: str = Field("default", description="Active user profile ID")
+
+
+class LLMApplyCorrectionsRequest(BaseModel):
+    page_id: UUID = Field(..., description="ID of page to update")
+    user_id: str = Field("default", description="Active user profile ID")
+    corrections: List[Dict[str, Any]] = Field(..., description="List of line corrections to commit")
+
+
+@router.post(
+    "/llm/correct",
+    summary="Perform page-level contextual error correction via LLM or heuristic engine",
+)
+async def correct_page_with_llm(
+    req: LLMCorrectPageRequest,
+    page_repo: PageRepository = Depends(get_page_repository),
+) -> dict:
+    """Run full-page context-aware correction on all segmented lines of a document page."""
+    page = await page_repo.get_page_with_lines(req.page_id)
+    if not page:
+        raise PageNotFoundException(req.page_id)
+
+    lines_data = [
+        {
+            "id": str(line.id),
+            "line_index": line.line_index,
+            "text": line.recognized_text or "",
+            "confidence": line.confidence or 0.8,
+        }
+        for line in page.lines
+    ]
+
+    from app.config import get_settings
+    from app.ml.llm_context_corrector import get_llm_context_corrector, LLMProviderConfig
+    settings = get_settings()
+
+    api_key = req.api_key
+    if not api_key and req.provider == "openrouter":
+        api_key = settings.OPENROUTER_API_KEY
+
+    model_name = req.model or (settings.OPENROUTER_DEFAULT_MODEL if req.provider == "openrouter" else "nex-agi/nex-n2.5-pro:free")
+
+    corrector = get_llm_context_corrector()
+    cfg = LLMProviderConfig(
+        provider=req.provider,
+        api_key=api_key,
+        base_url=req.base_url,
+        model=model_name,
+        temperature=req.temperature,
+    )
+
+    result = await corrector.correct_page_lines(lines_data, config=cfg, user_id=req.user_id)
+    return result
+
+
+@router.post(
+    "/llm/apply",
+    summary="Apply LLM contextual corrections to database, calibration profile, and markdown export",
+)
+async def apply_llm_corrections_endpoint(
+    req: LLMApplyCorrectionsRequest,
+    page_repo: PageRepository = Depends(get_page_repository),
+    doc_repo: DocumentRepository = Depends(get_document_repository),
+) -> dict:
+    """Commit verified LLM corrections into database and adapt user's personal profile."""
+    from app.api.dependencies import get_structurer_service, get_storage_service
+    from app.ml.llm_context_corrector import get_llm_context_corrector
+
+    structurer = get_structurer_service()
+    storage = get_storage_service()
+    corrector = get_llm_context_corrector()
+
+    res = await corrector.apply_corrections_to_database(
+        page_id=req.page_id,
+        corrected_lines=req.corrections,
+        user_id=req.user_id,
+        page_repo=page_repo,
+        doc_repo=doc_repo,
+        structurer=structurer,
+        storage=storage,
+    )
+    return res
+
+
 
 

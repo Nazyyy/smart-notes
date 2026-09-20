@@ -24,6 +24,7 @@ class TextLineBase(BaseModel):
     bbox_y: int = Field(ge=0)
     bbox_w: int = Field(gt=0)
     bbox_h: int = Field(gt=0)
+    original_raw_text: Optional[str] = Field(default=None, description="Raw OCR transcription before context correction")
     recognized_text: str = Field(default="", description="Decoded transcription text")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="OCR confidence score")
     is_header: bool = Field(default=False, description="Header classification flag")

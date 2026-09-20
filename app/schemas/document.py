@@ -15,6 +15,7 @@ class DocumentBase(BaseModel):
     """Base fields for documents."""
     title: str = Field(min_length=1, max_length=255, description="Human-readable title")
     description: Optional[str] = Field(default=None, description="Optional notes or context")
+    author: Optional[str] = Field(default="default", description="Author identifier or username")
 
 
 class DocumentCreate(DocumentBase):
@@ -32,6 +33,7 @@ class DocumentUpdate(BaseModel):
     description: Optional[str] = None
     status: Optional[DocumentStatus] = None
     error_message: Optional[str] = None
+    author: Optional[str] = None
 
 
 class DocumentRead(DocumentBase):
@@ -40,6 +42,7 @@ class DocumentRead(DocumentBase):
 
     id: UUID
     user_id: Optional[UUID] = None
+    author: Optional[str] = "default"
     original_filename: str
     file_path: str
     file_size_bytes: int

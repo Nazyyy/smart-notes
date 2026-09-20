@@ -15,6 +15,7 @@ from app.cv.illumination import (
     enhance_contrast_clahe,
     suppress_shadows_and_denoise,
     adaptive_binarize,
+    sauvola_threshold,
 )
 from app.cv.segmentation import (
     compute_horizontal_projection_profile,
@@ -30,6 +31,9 @@ from app.cv.enhancer import (
     enhance_stroke_sharpness,
     enhance_contrast_adaptive,
     suppress_paper_bleed_through,
+    suppress_notebook_grid_and_ruled_lines,
+    deskew_and_level_line_crop,
+    pad_line_crop,
     generate_tta_variants,
 )
 
@@ -43,6 +47,7 @@ __all__ = [
     "enhance_contrast_clahe",
     "suppress_shadows_and_denoise",
     "adaptive_binarize",
+    "sauvola_threshold",
     "compute_horizontal_projection_profile",
     "segment_line_intervals",
     "segment_text_lines",
@@ -52,5 +57,9 @@ __all__ = [
     "enhance_stroke_sharpness",
     "enhance_contrast_adaptive",
     "suppress_paper_bleed_through",
+    "suppress_notebook_grid_and_ruled_lines",
+    "deskew_and_level_line_crop",
+    "pad_line_crop",
     "generate_tta_variants",
 ]
+

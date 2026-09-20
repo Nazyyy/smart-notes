@@ -43,16 +43,17 @@ class DocumentRepository(BaseRepository[Document]):
                 reason=str(exc),
             ) from exc
 
-    async def list_recent(self, limit: int = 50, offset: int = 0) -> List[Document]:
-        """List documents sorted by creation date descending."""
+    async def list_recent(self, limit: int = 50, offset: int = 0, author: Optional[str] = None) -> List[Document]:
+        """List documents sorted by creation date descending, optionally filtered by author."""
         try:
             stmt = (
                 select(Document)
                 .options(selectinload(Document.pages))
                 .order_by(desc(Document.created_at))
-                .offset(offset)
-                .limit(limit)
             )
+            if author:
+                stmt = stmt.where(Document.author == author)
+            stmt = stmt.offset(offset).limit(limit)
             result = await self.session.execute(stmt)
             return list(result.scalars().all())
         except Exception as exc:

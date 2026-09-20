@@ -477,8 +477,12 @@ def segment_text_lines(
             if int(np.sum(crop_clean > 0)) < 90:
                 continue
 
+            from app.cv.enhancer import suppress_notebook_grid_and_ruled_lines, pad_line_crop
+            ready_crop = suppress_notebook_grid_and_ruled_lines(straight_crop)
+            ready_crop = pad_line_crop(ready_crop)
+
             bboxes.append((final_x, pad_y1, final_w, final_h))
-            crops.append(straight_crop)
+            crops.append(ready_crop)
 
         # Ensure top-to-bottom sorting by y coordinate
         sorted_pairs = sorted(zip(bboxes, crops), key=lambda item: item[0][1])

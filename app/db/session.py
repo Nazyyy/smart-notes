@@ -87,6 +87,21 @@ async def init_db_schema() -> None:
             # Import models to register entities on Base.metadata
             import app.models.entities  # noqa: F401
             await conn.run_sync(Base.metadata.create_all)
+
+            # Backward-compatible column migration for existing SQLite databases
+            def _migrate_columns(sync_conn):
+                try:
+                    cursor = sync_conn.cursor()
+                    cursor.execute("PRAGMA table_info(text_lines)")
+                    existing_cols = {row[1] for row in cursor.fetchall()}
+                    if existing_cols and "original_raw_text" not in existing_cols:
+                        cursor.execute("ALTER TABLE text_lines ADD COLUMN original_raw_text TEXT")
+                        logger.info("Migrated text_lines table: added original_raw_text column.")
+                    cursor.close()
+                except Exception as ex:
+                    logger.debug("Column migration check: %s", ex)
+
+            await conn.run_sync(_migrate_columns)
             logger.info("Database schema initialized successfully.")
     except Exception as exc:
         logger.error("Failed to initialize database schema: %s", exc, exc_info=True)

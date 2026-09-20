@@ -23,6 +23,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="Photograph or scan of handwritten note page"),
     title: str = Form(..., min_length=1, max_length=255, description="Document title"),
+    author: Optional[str] = Form("default", description="Author or profile ID for this note"),
     description: Optional[str] = Form(None, description="Optional document description"),
     process_immediately: bool = Form(True, description="Immediately trigger CV and ML pipeline"),
     async_background: bool = Form(False, description="Run processing in background task"),
@@ -36,6 +37,7 @@ async def upload_document(
         title=title,
         description=description,
         upload_file=file,
+        author=author,
         background_tasks=background_tasks if async_background else None,
         process_immediately=process_immediately,
     )
@@ -50,10 +52,11 @@ async def upload_document(
 async def list_documents(
     limit: int = Query(20, ge=1, le=100, description="Page limit"),
     offset: int = Query(0, ge=0, description="Page offset"),
+    author: Optional[str] = Query(None, description="Filter documents by author"),
     doc_service: DocumentService = Depends(get_document_service),
 ) -> DocumentListResponse:
-    """List documents ordered by creation date descending."""
-    items, total = await doc_service.list_documents(limit=limit, offset=offset)
+    """List documents ordered by creation date descending, optionally filtered by author."""
+    items, total = await doc_service.list_documents(limit=limit, offset=offset, author=author)
     return DocumentListResponse(
         items=[DocumentRead.model_validate(item) for item in items],
         total_count=total,

@@ -101,6 +101,7 @@ class Document(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
+    author: Mapped[Optional[str]] = mapped_column(String(64), default="default", nullable=True, index=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     file_path: Mapped[str] = mapped_column(String(1024), nullable=False)
@@ -179,6 +180,7 @@ class TextLine(Base):
     bbox_w: Mapped[int] = mapped_column(Integer, nullable=False)
     bbox_h: Mapped[int] = mapped_column(Integer, nullable=False)
     cropped_image_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    original_raw_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     recognized_text: Mapped[str] = mapped_column(Text, default="", nullable=False)
     confidence: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     is_header: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

@@ -182,6 +182,7 @@ class SyntheticHandwritingGenerator:
         min_width: int = 256,
         paper_type: str = "random",
         add_baseline_wave: bool = True,
+        messy_handwriting: bool = False,
     ) -> Tuple[np.ndarray, str]:
         """
         Renders a single synthetic line of handwritten text with physical handwriting traits.
@@ -232,12 +233,16 @@ class SyntheticHandwritingGenerator:
 
         curr_x = pad_x
         base_y = pad_y
-        wave_freq = random.uniform(0.04, 0.12)
-        wave_amp = random.uniform(1.0, 3.5) if add_baseline_wave else 0.0
+        wave_freq = random.uniform(0.04, 0.16)
+        if messy_handwriting:
+            wave_amp = random.uniform(2.8, 6.0)
+        else:
+            wave_amp = random.uniform(1.0, 3.5) if add_baseline_wave else 0.0
 
         for idx, char in enumerate(text):
             # Character offset with sine-wave baseline jitter + micro randomness
-            jitter_y = int(math.sin(idx * wave_freq) * wave_amp + random.uniform(-0.8, 0.8))
+            jitter_range = (-1.8, 1.8) if messy_handwriting else (-0.8, 0.8)
+            jitter_y = int(math.sin(idx * wave_freq) * wave_amp + random.uniform(*jitter_range))
             y_pos = base_y + jitter_y
 
             # Render character
@@ -246,7 +251,8 @@ class SyntheticHandwritingGenerator:
             # Advance X by character width + slight tracking variation
             c_bbox = dummy_draw.textbbox((0, 0), char, font=font)
             char_w = max(c_bbox[2] - c_bbox[0], font_size // 5)
-            curr_x += char_w + random.randint(-1, 2)
+            spacing_jitter = random.randint(-3, 5) if messy_handwriting else random.randint(-1, 2)
+            curr_x += char_w + spacing_jitter
 
         # Alpha composite text layer over paper background
         pil_canvas.paste(text_layer, (0, 0), mask=text_layer)

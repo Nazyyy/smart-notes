@@ -56,10 +56,14 @@ def get_pipeline(
     structurer: NoteStructurerService = Depends(get_structurer_service),
 ) -> DocumentProcessingPipeline:
     """Factory for DocumentProcessingPipeline with injected dependencies."""
+    from fastapi.params import Depends as DependsType
+    resolved_storage = get_storage_service() if isinstance(storage, DependsType) else storage
+    resolved_engine = get_inference_engine() if isinstance(inference_engine, DependsType) else inference_engine
+    resolved_structurer = get_structurer_service() if isinstance(structurer, DependsType) else structurer
     return DocumentProcessingPipeline(
-        storage_service=storage,
-        inference_engine=inference_engine,
-        structurer_service=structurer,
+        storage_service=resolved_storage,
+        inference_engine=resolved_engine,
+        structurer_service=resolved_structurer,
     )
 
 

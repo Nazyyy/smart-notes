@@ -119,6 +119,42 @@ class HandwrittenNotebookAugmentor:
             # Heavy bleed / thick gel pen
             return cv2.erode(image, kernel, iterations=1)
 
+    @staticmethod
+    def apply_elastic_distortion(image: np.ndarray, prob: float = 0.40, alpha: float = 7.0, sigma: float = 3.0) -> np.ndarray:
+        """Simulate uneven handwritten scribbles, wavy line compression and expansion."""
+        if random.random() > prob or image.shape[0] < 10 or image.shape[1] < 20:
+            return image
+
+        h, w = image.shape[:2]
+        dx = cv2.GaussianBlur((np.random.rand(h, w) * 2 - 1).astype(np.float32), (0, 0), sigma) * alpha
+        dy = cv2.GaussianBlur((np.random.rand(h, w) * 2 - 1).astype(np.float32), (0, 0), sigma) * alpha
+
+        x, y = np.meshgrid(np.arange(w), np.arange(h))
+        map_x = np.float32(x + dx)
+        map_y = np.float32(y + dy)
+
+        mean_bg = tuple(int(c) for c in np.mean(image[:3, :3], axis=(0, 1))) if image.ndim == 3 else 255
+        return cv2.remap(image, map_x, map_y, interpolation=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=mean_bg)
+
+    @staticmethod
+    def apply_ink_blotches_and_skips(image: np.ndarray, prob: float = 0.35) -> np.ndarray:
+        """Simulate realistic pen skips, micro-breaks, and ink blotches common in rushed student notes."""
+        if random.random() > prob or image.shape[0] < 12 or image.shape[1] < 24:
+            return image
+
+        h, w = image.shape[:2]
+        canvas = image.copy()
+
+        num_blotches = random.randint(1, 3)
+        for _ in range(num_blotches):
+            bx = random.randint(8, w - 8)
+            by = random.randint(6, h - 6)
+            radius = random.randint(1, 3)
+            ink_color = (random.randint(15, 45), random.randint(25, 65), random.randint(90, 160)) if canvas.ndim == 3 else random.randint(25, 75)
+            cv2.circle(canvas, (bx, by), radius, ink_color, -1)
+
+        return canvas
+
     @classmethod
     def augment(cls, image: np.ndarray) -> np.ndarray:
         """Run full augmentation pipeline on a line crop."""
@@ -126,6 +162,9 @@ class HandwrittenNotebookAugmentor:
         aug = cls.add_notebook_grid(aug, prob=0.45)
         aug = cls.add_ruled_lines(aug, prob=0.30)
         aug = cls.apply_shear(aug, prob=0.40)
+        aug = cls.apply_elastic_distortion(aug, prob=0.35)
         aug = cls.apply_motion_blur(aug, prob=0.30)
         aug = cls.apply_ink_degradation(aug, prob=0.25)
+        aug = cls.apply_ink_blotches_and_skips(aug, prob=0.30)
         return aug
+

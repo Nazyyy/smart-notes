@@ -49,17 +49,241 @@ def render_highlighted_preview(text: str, uncertain_words: List[str]) -> str:
     return " ".join(html_parts)
 
 
-def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> None:
-    """Render interactive card-based list of lines for review and correction."""
-    st.subheader("✏️ Построчный редактор с матрицей подсказок")
+def render_line_editor(
+    page: Dict[str, Any], api_client: BackendAPIClient, user_id: str = "default"
+) -> None:
+    """Render interactive line text list with automatic NLP & LLM context corrections."""
+    st.subheader(f"🤖 3. Текст с фото + Алгоритмы & LLM (Автор: {user_id})")
 
     lines: List[Dict[str, Any]] = page.get("lines", [])
     if not lines:
         st.info("Сегментированные строки на странице отсутствуют.")
         return
 
+    # --------------------------------------------------------------------------
+    # LLM & SEMANTIC CONTEXT CORRECTOR PANEL
+    # --------------------------------------------------------------------------
+    with st.expander("✨ Интеллектуальный контекстный корректор (LLM & NLP)", expanded=True):
+        st.markdown(
+            "Анализирует **всю страницу целиком**, восстанавливает научный контекст (физика, химия, обществознание, математика), "
+            "исправляет оптические ошибки беглого почерка и сшивает переносы слов."
+        )
+
+        col_prov, col_model = st.columns([1, 1])
+
+        provider_options = {
+            "openrouter": "🌐 OpenRouter (nex-agi/nex-n2.5-pro:free) — По умолчанию",
+            "heuristic": "⚡ Локальный NLP (Офлайн эвристика без LLM)",
+            "ollama": "🦙 Ollama (Локально: Qwen 2.5 7B / Vikhr)",
+            "openai": "✨ OpenAI (GPT-4o / GPT-4o-mini)",
+            "custom": "🔧 Пользовательский OpenAI-совместимый endpoint",
+        }
+
+        with col_prov:
+            prov_key = st.selectbox(
+                "Провайдер интеллекта:",
+                options=list(provider_options.keys()),
+                format_func=lambda x: provider_options[x],
+                key=f"llm_provider_{page['id']}",
+            )
+
+        with col_model:
+            if prov_key == "openrouter":
+                openrouter_presets = [
+                    "nex-agi/nex-n2.5-pro:free",
+                    "nex-agi/nex-n2.5-mini:free",
+                    "deepseek/deepseek-v4-flash-0731:free",
+                    "Другая модель OpenRouter...",
+                ]
+                or_preset_labels = {
+                    "nex-agi/nex-n2.5-pro:free": "nex-agi/nex-n2.5-pro:free (100% точность, глубокий анализ / Free)",
+                    "nex-agi/nex-n2.5-mini:free": "nex-agi/nex-n2.5-mini:free (Сверхбыстрая ~1.6 сек / Free)",
+                    "deepseek/deepseek-v4-flash-0731:free": "deepseek/deepseek-v4-flash-0731:free (DeepSeek v4 Flash / Free)",
+                    "Другая модель OpenRouter...": "Ввести имя модели OpenRouter вручную...",
+                }
+                sel_preset = st.selectbox(
+                    "Модель OpenRouter:",
+                    options=openrouter_presets,
+                    format_func=lambda x: or_preset_labels.get(x, x),
+                    key=f"or_preset_{page['id']}",
+                )
+                if sel_preset == "Другая модель OpenRouter...":
+                    chosen_model = st.text_input(
+                        "Имя модели:",
+                        value="nex-agi/nex-n2.5-pro:free",
+                        key=f"llm_model_custom_{page['id']}",
+                    )
+                else:
+                    chosen_model = sel_preset
+            elif prov_key == "ollama":
+                ollama_presets = [
+                    "qwen2.5:7b",
+                    "rscr/vikhr_llama3.2_1b:latest",
+                    "Другая локальная модель...",
+                ]
+                preset_labels = {
+                    "qwen2.5:7b": "qwen2.5:7b (Qwen 7B — Высокая точность)",
+                    "rscr/vikhr_llama3.2_1b:latest": "rscr/vikhr_llama3.2_1b (Vikhr 1B — Сверхбыстрая русская)",
+                    "Другая локальная модель...": "Ввести имя другой модели вручную...",
+                }
+                sel_preset = st.selectbox(
+                    "Модель Ollama:",
+                    options=ollama_presets,
+                    format_func=lambda x: preset_labels.get(x, x),
+                    key=f"ollama_preset_{page['id']}",
+                )
+                if sel_preset == "Другая локальная модель...":
+                    chosen_model = st.text_input(
+                        "Имя модели:",
+                        value="qwen2.5:7b",
+                        key=f"llm_model_custom_{page['id']}",
+                    )
+                else:
+                    chosen_model = sel_preset
+            else:
+                default_models = {
+                    "openrouter": "nex-agi/nex-n2.5-pro:free",
+                    "openai": "gpt-4o-mini",
+                    "heuristic": "Academic-NLP-Heuristic",
+                    "custom": "custom-model",
+                }
+                chosen_model = st.text_input(
+                    "Имя модели:",
+                    value=st.session_state.get("llm_model_name", default_models.get(prov_key, "nex-agi/nex-n2.5-pro:free")),
+                    key=f"llm_model_input_{page['id']}",
+                    disabled=(prov_key == "heuristic"),
+                )
+            st.session_state["llm_model_name"] = chosen_model
+
+        col_key, col_url = st.columns([1, 1])
+        if prov_key != "heuristic":
+            with col_key:
+                import os
+                default_openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+                init_key_val = st.session_state.get(
+                    "llm_api_key",
+                    default_openrouter_key if prov_key == "openrouter" else "",
+                )
+                api_key_val = st.text_input(
+                    "API Ключ:",
+                    type="password",
+                    value=init_key_val,
+                    placeholder="sk-or-v1-..." if prov_key == "openrouter" else "sk-...",
+                    key=f"llm_key_input_{page['id']}",
+                )
+                if api_key_val:
+                    st.session_state["llm_api_key"] = api_key_val
+            with col_url:
+                default_urls = {
+                    "openrouter": "https://openrouter.ai/api/v1",
+                    "openai": "https://api.openai.com/v1",
+                    "ollama": "http://localhost:11434/v1",
+                    "custom": "http://localhost:8080/v1",
+                }
+                custom_url_val = st.text_input(
+                    "Base URL:",
+                    value=st.session_state.get("llm_base_url", default_urls.get(prov_key, "")),
+                    key=f"llm_url_input_{page['id']}",
+                )
+                if custom_url_val:
+                    st.session_state["llm_base_url"] = custom_url_val
+        else:
+            api_key_val = None
+            custom_url_val = None
+
+        col_run, col_clear = st.columns([3, 1])
+        with col_run:
+            if st.button("✨ Исправить ошибки контекстом всей страницы", use_container_width=True, type="primary"):
+                if prov_key == "ollama":
+                    sp_text = "🧠 Выполняется контекстный анализ через локальную Ollama (Qwen 7B)... Пожалуйста, подождите (~10–25 сек)..."
+                elif "pro" in chosen_model:
+                    sp_text = "🧠 Глубокий смысловой анализ всей страницы через nex-n2.5-pro... Занимает ~15–20 сек, запрос обрабатывается..."
+                else:
+                    sp_text = f"⚡ Быстрый контекстный анализ всей страницы ({chosen_model})... Занимает ~2–5 сек..."
+
+                with st.spinner(sp_text):
+                    try:
+                        llm_res = api_client.correct_page_with_llm(
+                            page_id=page["id"],
+                            provider=prov_key,
+                            api_key=api_key_val or st.session_state.get("llm_api_key"),
+                            base_url=custom_url_val or st.session_state.get("llm_base_url"),
+                            model=chosen_model,
+                            user_id=user_id,
+                        )
+                        st.session_state[f"llm_res_{page['id']}"] = llm_res
+                        if llm_res.get("status") == "quota_exhausted":
+                            st.warning("⚠️ Дневной лимит бесплатных запросов OpenRouter исчерпан. Рекомендуется переключиться на локальный NLP или Ollama.")
+                        elif llm_res.get("status") == "fallback_success":
+                            st.info(f"ℹ️ {llm_res.get('provider', 'Резервная эвристика')}: найдено исправлений: {llm_res.get('corrected_count', 0)}")
+                        else:
+                            st.success(
+                                f"Готово! Обработано строк: {llm_res.get('total_lines', 0)}, "
+                                f"найдено исправлений: {llm_res.get('corrected_count', 0)}"
+                            )
+                    except Exception as exc:
+                        st.error(f"Сбой выполнения контекстной коррекции: {exc}")
+
+        with col_clear:
+            if f"llm_res_{page['id']}" in st.session_state:
+                if st.button("Скрыть предложения", use_container_width=True):
+                    st.session_state.pop(f"llm_res_{page['id']}", None)
+                    st.rerun()
+
+        # Display proposed fixes and 1-click apply
+        if f"llm_res_{page['id']}" in st.session_state:
+            cached_res = st.session_state[f"llm_res_{page['id']}"]
+            proposed_lines = cached_res.get("lines", [])
+            changed_items = [l for l in proposed_lines if l.get("changed")]
+
+            if changed_items:
+                st.markdown(f"#### 🔍 Найдено **{len(changed_items)}** исправлений:")
+
+                for item in changed_items:
+                    l_idx = item.get("line_index", 0)
+                    orig = item.get("original_text", "")
+                    corr = item.get("corrected_text", "")
+                    expl = item.get("explanation", "")
+
+                    st.markdown(
+                        f"""
+                        <div style="background-color: #f8fafc; border-left: 4px solid #3b82f6; padding: 8px 12px; margin-bottom: 8px; border-radius: 4px;">
+                            <span style="font-weight: 600; color: #1e40af;">Строка #{l_idx}:</span><br/>
+                            <span style="color: #ef4444; text-decoration: line-through;">{orig}</span> ➔ 
+                            <span style="color: #15803d; font-weight: 600;">{corr}</span><br/>
+                            <span style="font-size: 0.85em; color: #64748b;">💡 {expl}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                if st.button("✅ Применить все исправления к конспекту", use_container_width=True, type="primary"):
+                    with st.spinner("Сохранение исправлений и адаптация профиля..."):
+                        try:
+                            apply_res = api_client.apply_llm_corrections(
+                                page_id=page["id"],
+                                corrections=proposed_lines,
+                                user_id=user_id,
+                            )
+                            # Clear local line input caches
+                            for p_line in proposed_lines:
+                                line_id_k = p_line.get("line_id")
+                                if line_id_k:
+                                    st.session_state[f"line_input_{line_id_k}"] = p_line.get("corrected_text")
+                            st.session_state.pop(f"llm_res_{page['id']}", None)
+                            st.success("Все исправления успешно применены! Калибровка автора обновлена.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Не удалось применить исправления: {exc}")
+            else:
+                st.info("Текст распознан отлично! Оптических или контекстных ошибок не выявлено.")
+
+    st.divider()
     st.markdown(f"Всего обнаружено строк: **{len(lines)}**")
 
+    # --------------------------------------------------------------------------
+    # LINE BY LINE CARD LIST
+    # --------------------------------------------------------------------------
     for line in lines:
         line_id = line.get("id")
         line_idx = line.get("line_index", 0)
@@ -83,7 +307,6 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
                 text=current_val, confidence=conf, top_k=3
             )
             st.session_state[cache_key] = uncertain_words_with_cands
-
 
         with st.container():
             col_crop, col_edit, col_btn = st.columns([4, 6, 2])
@@ -115,6 +338,10 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
                     label_visibility="collapsed",
                 )
 
+                orig_raw = line.get("original_raw_text")
+                if orig_raw and orig_raw.strip() and orig_raw.strip() != new_text.strip():
+                    st.caption(f"🔍 Сырой OCR до LLM-коррекции: *{orig_raw}*")
+
                 # Render one-click suggestion chips for uncertain words
                 if uncertain_words_with_cands:
                     st.caption("💡 Быстрые подсказки матрицы почерка:")
@@ -136,8 +363,10 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
                                             new_text=updated,
                                         )
                                         # Send correction to adaptive personalization engine
-                                        api_client.learn_personalization(original=orig_word, corrected=cand_word)
-                                        st.success(f"Заменено на «{cand_word}» (калибровка почерка обновлена)!")
+                                        api_client.learn_personalization(
+                                            original=orig_word, corrected=cand_word, user_id=user_id
+                                        )
+                                        st.success(f"Заменено на «{cand_word}» (калибровка '{user_id}' обновлена)!")
                                         st.rerun()
                                     except Exception as exc:
                                         st.error(f"Ошибка: {exc}")
@@ -158,9 +387,12 @@ def render_line_editor(page: Dict[str, Any], api_client: BackendAPIClient) -> No
                             clean_ot = ot.strip(".,;:!?()-\"\'")
                             clean_nt = nt.strip(".,;:!?()-\"\'")
                             if clean_ot.lower() != clean_nt.lower() and len(clean_ot) >= 2 and len(clean_nt) >= 2:
-                                api_client.learn_personalization(original=clean_ot, corrected=clean_nt)
-                        st.success("Сохранено (профиль калибровки обновлен)!")
+                                api_client.learn_personalization(
+                                    original=clean_ot, corrected=clean_nt, user_id=user_id
+                                )
+                        st.success(f"Сохранено (профиль '{user_id}' обновлен)!")
                     except Exception as exc:
                         st.error(f"Ошибка сохранения: {exc}")
 
             st.divider()
+

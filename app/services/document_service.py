@@ -5,7 +5,7 @@ Coordinates repositories, storage, asynchronous pipeline jobs, and exports.
 """
 
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict, Any
 from uuid import UUID, uuid4
 import cv2
 from fastapi import UploadFile, BackgroundTasks
@@ -44,6 +44,7 @@ class DocumentService:
         title: str,
         description: Optional[str],
         upload_file: UploadFile,
+        author: Optional[str] = "default",
         background_tasks: Optional[BackgroundTasks] = None,
         process_immediately: bool = True,
     ) -> Document:
@@ -62,6 +63,7 @@ class DocumentService:
         document = Document(
             id=document_id,
             title=title,
+            author=author or "default",
             description=description,
             original_filename=upload_file.filename or "upload.jpg",
             file_path=str(saved_file_path),
@@ -110,9 +112,11 @@ class DocumentService:
             raise DocumentNotFoundException(document_id)
         return doc
 
-    async def list_documents(self, limit: int = 50, offset: int = 0) -> Tuple[List[Document], int]:
-        """List documents and return total count."""
-        items = await self.doc_repo.list_recent(limit=limit, offset=offset)
+    async def list_documents(
+        self, limit: int = 50, offset: int = 0, author: Optional[str] = None
+    ) -> Tuple[List[Document], int]:
+        """List documents and return total count, optionally filtered by author."""
+        items = await self.doc_repo.list_recent(limit=limit, offset=offset, author=author)
         total = await self.doc_repo.count()
         return items, total
 
@@ -172,3 +176,113 @@ class DocumentService:
         )
 
         return content
+
+    async def export_document_with_ai(
+        self,
+        document_id: UUID,
+        provider: str = "openrouter",
+        model: str = "nex-agi/nex-n2.5-pro:free",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        length_mode: str = "medium",
+        enrich_facts: bool = False,
+        creativity_mode: str = "strict",
+    ) -> str:
+        """Synthesize a complete, customized academic study guide using LLM and save as primary Markdown export."""
+        from app.config import get_settings
+        from app.ml.llm_context_corrector import get_llm_context_corrector, LLMProviderConfig
+
+        doc = await self.get_document(document_id)
+        all_lines: List[TextLine] = []
+        for page in sorted(doc.pages, key=lambda p: p.page_number):
+            all_lines.extend(sorted(page.lines, key=lambda l: l.line_index))
+
+        raw_texts = [line.recognized_text.strip() for line in all_lines if line.recognized_text and line.recognized_text.strip()]
+
+        settings = get_settings()
+        key = api_key or (settings.OPENROUTER_API_KEY if provider == "openrouter" else None)
+        cfg = LLMProviderConfig(
+            provider=provider,
+            api_key=key,
+            base_url=base_url,
+            model=model or settings.OPENROUTER_DEFAULT_MODEL,
+        )
+
+        corrector = get_llm_context_corrector()
+        synthesized_md = await corrector.synthesize_study_guide(
+            raw_texts,
+            document_title=doc.title,
+            config=cfg,
+            length_mode=length_mode,
+            enrich_facts=enrich_facts,
+            creativity_mode=creativity_mode,
+        )
+
+        # Save to disk
+        export_dir = self.storage.get_export_directory(document_id)
+        file_path = export_dir / "export_markdown.md"
+        await self.storage.write_text_file(file_path, synthesized_md)
+
+        # Also write plain text version
+        txt_path = export_dir / "export_txt.txt"
+        await self.storage.write_text_file(txt_path, synthesized_md)
+
+        # Persist export record
+        await self.doc_repo.save_export(
+            document_id=document_id,
+            export_format=ExportFormat.MARKDOWN.value,
+            file_path=str(file_path),
+            content=synthesized_md,
+        )
+        await self.doc_repo.save_export(
+            document_id=document_id,
+            export_format=ExportFormat.TXT.value,
+            file_path=str(txt_path),
+            content=synthesized_md,
+        )
+
+        return synthesized_md
+
+    async def generate_interactive_kit(
+        self,
+        document_id: UUID,
+        provider: str = "openrouter",
+        model: str = "nex-agi/nex-n2.5-pro:free",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Generate or retrieve interactive study kit (flashcards, cloze tests, quiz)."""
+        from app.config import get_settings
+        from app.ml.llm_context_corrector import get_llm_context_corrector, LLMProviderConfig
+
+        doc = await self.get_document(document_id)
+        all_lines: List[TextLine] = []
+        for page in sorted(doc.pages, key=lambda p: p.page_number):
+            all_lines.extend(sorted(page.lines, key=lambda l: l.line_index))
+
+        raw_texts = [line.recognized_text.strip() for line in all_lines if line.recognized_text and line.recognized_text.strip()]
+
+        settings = get_settings()
+        key = api_key or (settings.OPENROUTER_API_KEY if provider == "openrouter" else None)
+        cfg = LLMProviderConfig(
+            provider=provider,
+            api_key=key,
+            base_url=base_url,
+            model=model or settings.OPENROUTER_DEFAULT_MODEL,
+        )
+
+        corrector = get_llm_context_corrector()
+        kit = await corrector.generate_interactive_study_kit(raw_texts, document_title=doc.title, config=cfg)
+
+        # Save kit to disk cache
+        try:
+            import json
+            export_dir = self.storage.get_export_directory(document_id)
+            kit_path = export_dir / "interactive_kit.json"
+            await self.storage.write_text_file(kit_path, json.dumps(kit, ensure_ascii=False, indent=2))
+        except Exception as exc:
+            logger.warning("Failed caching interactive kit to disk: %s", exc)
+
+        return kit
+
+

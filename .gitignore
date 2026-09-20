@@ -29,11 +29,14 @@ env/
 # Large ML Weights, Datasets, and Local Storage
 data/weights/*
 !data/weights/.gitkeep
+!data/weights/crnn_htr_weights.pt
 data/datasets/*
 !data/datasets/.gitkeep
 data/processed_htr/*
 data/storage/*
 !data/storage/.gitkeep
+data/user_profiles/*
+!data/user_profiles/.gitkeep
 data/dictionary/*
 *.incomplete
 

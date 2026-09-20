@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import AsyncGenerator, Generator
 import cv2
 import numpy as np
+from PIL import Image, ImageDraw, ImageFont
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -134,7 +135,7 @@ def synthetic_page_image() -> np.ndarray:
     for c in range(3):
         img[:, :, c] = (img[:, :, c] * shadow_mask).astype(np.uint8)
 
-    # Draw simulated handwritten lines
+    # Draw simulated handwritten lines with proper UTF-8 Cyrillic font
     lines_text = [
         "1. Лекция: Математический анализ",
         "Функция f(x) непрерывна на отрезке [a, b]",
@@ -144,39 +145,52 @@ def synthetic_page_image() -> np.ndarray:
         "Формула Ньютона-Лейбница: F(b) - F(a) = I",
     ]
 
-    start_y = 120
+    # Use TrueType font for genuine Cyrillic letters without '????' artifacts
+    pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+    font = None
+    for fp in [
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    ]:
+        if Path(fp).exists():
+            try:
+                font = ImageFont.truetype(fp, 22)
+                break
+            except Exception:
+                pass
+    if font is None:
+        font = ImageFont.load_default()
+
+    start_y = 100
     spacing = 70
-
     for i, text in enumerate(lines_text):
-        y = start_y + i * spacing
-        # Draw dark ink strokes
-        cv2.putText(
-            img,
-            text,
-            (60, y),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.65,
-            (30, 20, 15),
-            2,
-            cv2.LINE_AA,
-        )
+        draw.text((60, start_y + i * spacing), text, font=font, fill=(30, 20, 15))
 
-    return img
+    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
 
 
 @pytest.fixture
 def synthetic_line_crop() -> np.ndarray:
-    """Generate a single cropped text line image of size 40x280."""
+    """Generate a single cropped text line image of size 40x280 with readable Cyrillic."""
     h, w = 40, 280
     line_img = np.full((h, w, 3), 250, dtype=np.uint8)
-    cv2.putText(
-        line_img,
-        "Тестовая строка 123",
-        (10, 28),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.7,
-        (20, 20, 20),
-        2,
-        cv2.LINE_AA,
-    )
-    return line_img
+    pil_img = Image.fromarray(cv2.cvtColor(line_img, cv2.COLOR_BGR2RGB))
+    draw = ImageDraw.Draw(pil_img)
+    font = None
+    for fp in [
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/liberation/LiberationSans-Regular.ttf",
+    ]:
+        if Path(fp).exists():
+            try:
+                font = ImageFont.truetype(fp, 20)
+                break
+            except Exception:
+                pass
+    if font is None:
+        font = ImageFont.load_default()
+
+    draw.text((10, 8), "Тестовая строка 123", font=font, fill=(20, 20, 20))
+    return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)

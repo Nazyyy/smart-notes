@@ -93,13 +93,23 @@ class TransformerHTREngine:
         logger.info("Initializing TransformerHTREngine from %s on %s...", self.model_path, self.device)
         try:
             self.processor = TrOCRProcessor.from_pretrained(str(self.model_path))
-            self.model = VisionEncoderDecoderModel.from_pretrained(str(self.model_path))
+            target_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
             try:
+                self.model = VisionEncoderDecoderModel.from_pretrained(
+                    str(self.model_path),
+                    torch_dtype=target_dtype,
+                )
                 self.model.to(self.device)
-            except torch.cuda.OutOfMemoryError:
-                logger.warning("CUDA memory pressure encountered, falling back to CPU for inference.")
-                self.device = torch.device("cpu")
-                self.model.to(self.device)
+            except (torch.cuda.OutOfMemoryError, RuntimeError) as exc:
+                if "out of memory" in str(exc).lower() or isinstance(exc, torch.cuda.OutOfMemoryError):
+                    logger.warning("CUDA memory pressure encountered during TrOCR load, falling back to CPU: %s", exc)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                    self.device = torch.device("cpu")
+                    self.model = VisionEncoderDecoderModel.from_pretrained(str(self.model_path))
+                    self.model.to(self.device)
+                else:
+                    raise
 
             self.model.eval()
 
@@ -110,7 +120,7 @@ class TransformerHTREngine:
                 except Exception:
                     pass
 
-            logger.info("TransformerHTREngine loaded successfully on %s.", self.device)
+            logger.info("TransformerHTREngine loaded successfully on %s (dtype: %s).", self.device, self.model.dtype)
 
         except Exception as exc:
             logger.error("Failed to load Transformer model from %s: %s", self.model_path, exc)
@@ -223,32 +233,23 @@ class TransformerHTREngine:
 
             # --- Fast-Path: Evaluate primary unaugmented crop first ---
             pil_primary = self._prepare_pil_crop(sub_crop)
-            pixel_primary = self.processor(images=[pil_primary], return_tensors="pt").pixel_values.to(self.device)
+            pixel_primary = self.processor(images=[pil_primary], return_tensors="pt").pixel_values.to(
+                device=self.device, dtype=self.model.dtype
+            )
 
-            with torch.no_grad():
-                if self.device.type == "cuda":
-                    with torch.autocast(device_type="cuda", dtype=torch.float16):
-                        outputs = self.model.generate(
-                            pixel_primary,
-                            max_new_tokens=64,
-                            num_beams=3,
-                            repetition_penalty=1.25,
-                            no_repeat_ngram_size=3,
-                            early_stopping=True,
-                            return_dict_in_generate=True,
-                            output_scores=True,
-                        )
-                else:
-                    outputs = self.model.generate(
-                        pixel_primary,
-                        max_new_tokens=64,
-                        num_beams=3,
-                        repetition_penalty=1.25,
-                        no_repeat_ngram_size=3,
-                        early_stopping=True,
-                        return_dict_in_generate=True,
-                        output_scores=True,
-                    )
+            num_beams = 2 if self.device.type == "cuda" else 1
+
+            with torch.inference_mode():
+                outputs = self.model.generate(
+                    pixel_primary,
+                    max_new_tokens=64,
+                    num_beams=num_beams,
+                    repetition_penalty=1.25,
+                    no_repeat_ngram_size=3,
+                    early_stopping=True if num_beams > 1 else False,
+                    return_dict_in_generate=True,
+                    output_scores=True,
+                )
 
             try:
                 scores = self.model.compute_transition_scores(
@@ -275,32 +276,21 @@ class TransformerHTREngine:
                 extra_variants = variants[1:] if len(variants) > 1 else []
                 if extra_variants:
                     pil_extras = [self._prepare_pil_crop(v[1]) for v in extra_variants]
-                    pixel_extras = self.processor(images=pil_extras, return_tensors="pt").pixel_values.to(self.device)
+                    pixel_extras = self.processor(images=pil_extras, return_tensors="pt").pixel_values.to(
+                        device=self.device, dtype=self.model.dtype
+                    )
 
-                    with torch.no_grad():
-                        if self.device.type == "cuda":
-                            with torch.autocast(device_type="cuda", dtype=torch.float16):
-                                extra_outputs = self.model.generate(
-                                    pixel_extras,
-                                    max_new_tokens=64,
-                                    num_beams=3,
-                                    repetition_penalty=1.25,
-                                    no_repeat_ngram_size=3,
-                                    early_stopping=True,
-                                    return_dict_in_generate=True,
-                                    output_scores=True,
-                                )
-                        else:
-                            extra_outputs = self.model.generate(
-                                pixel_extras,
-                                max_new_tokens=64,
-                                num_beams=3,
-                                repetition_penalty=1.25,
-                                no_repeat_ngram_size=3,
-                                early_stopping=True,
-                                return_dict_in_generate=True,
-                                output_scores=True,
-                            )
+                    with torch.inference_mode():
+                        extra_outputs = self.model.generate(
+                            pixel_extras,
+                            max_new_tokens=64,
+                            num_beams=num_beams,
+                            repetition_penalty=1.25,
+                            no_repeat_ngram_size=3,
+                            early_stopping=True if num_beams > 1 else False,
+                            return_dict_in_generate=True,
+                            output_scores=True,
+                        )
 
                     try:
                         extra_scores = self.model.compute_transition_scores(
@@ -367,39 +357,125 @@ class TransformerHTREngine:
         avg_conf = float(np.mean([c for _, c in span_results if c > 0])) if span_results else 0.88
         return line_text, round(avg_conf, 4)
 
+    def _predict_crops_batch(
+        self,
+        crops: List[np.ndarray],
+        use_beam_search: bool = True,
+    ) -> List[Tuple[str, float]]:
+        """
+        Process a sub-batch of single-span crops simultaneously in FP16 on GPU.
+        """
+        if not crops:
+            return []
+
+        pil_images = [self._prepare_pil_crop(c) for c in crops]
+        pixel_values = self.processor(images=pil_images, return_tensors="pt").pixel_values.to(
+            device=self.device, dtype=self.model.dtype
+        )
+
+        num_beams = 2 if (use_beam_search and self.device.type == "cuda") else 1
+
+        with torch.inference_mode():
+            outputs = self.model.generate(
+                pixel_values,
+                max_new_tokens=64,
+                num_beams=num_beams,
+                repetition_penalty=1.2,
+                early_stopping=True if num_beams > 1 else False,
+                return_dict_in_generate=True,
+                output_scores=True,
+            )
+
+            try:
+                scores = self.model.compute_transition_scores(
+                    outputs.sequences, outputs.scores, outputs.beam_indices, normalize_logits=True
+                )
+            except Exception:
+                scores = None
+
+        decoded_texts = self.processor.batch_decode(outputs.sequences, skip_special_tokens=True)
+        batch_results: List[Tuple[str, float]] = []
+
+        for idx, raw_t in enumerate(decoded_texts):
+            clean_t = postprocess_scientific_and_academic(raw_t)
+            conf = 0.85
+            if scores is not None and idx < len(scores):
+                probs = torch.exp(scores[idx])
+                valid = probs[probs > 0]
+                if len(valid) > 0:
+                    conf = float(valid.mean().item())
+            batch_results.append((clean_t, round(conf, 4)))
+
+        return batch_results
+
     def predict_batch(
         self,
         images: List[np.ndarray],
         use_beam_search: bool = True,
     ) -> List[Tuple[str, float]]:
         """
-        Run sequential inference across a batch of line crops,
-        propagating cross-line linguistic context from each recognized line to the next.
+        Run high-throughput batched inference across line crops on GPU.
+        Processes lines in batches of self.batch_size with automatic CPU fallback on OOM.
         """
         if not images:
             return []
 
         results: List[Tuple[str, float]] = []
-        last_recognized_text: Optional[str] = None
-
         total_crops = len(images)
+
         try:
-            for idx, crop in enumerate(images):
-                text, conf = self.predict_single_line(
-                    crop,
-                    enable_tta=True,
-                    context_prev_line=last_recognized_text,
-                )
-                if text and text.strip():
-                    last_recognized_text = text.strip()
-                results.append((text, conf))
+            if self.device.type == "cuda":
+                torch.cuda.empty_cache()
+
+            i = 0
+            while i < total_crops:
+                crop = images[i]
+                spans = self._segment_line_into_spans(crop) if crop is not None and crop.size > 0 else []
+
+                if len(spans) > 1 or not spans:
+                    text, conf = self.predict_single_line(crop, enable_tta=False)
+                    results.append((text, conf))
+                    i += 1
+                    continue
+
+                # Gather consecutive single-span crops up to batch_size
+                batch_crops = [spans[0][0]]
+                j = i + 1
+                while j < total_crops and len(batch_crops) < self.batch_size:
+                    c_next = images[j]
+                    spans_next = self._segment_line_into_spans(c_next) if c_next is not None and c_next.size > 0 else []
+                    if len(spans_next) == 1:
+                        batch_crops.append(spans_next[0][0])
+                        j += 1
+                    else:
+                        break
+
+                try:
+                    batch_res = self._predict_crops_batch(batch_crops, use_beam_search=use_beam_search)
+                    results.extend(batch_res)
+                except (torch.cuda.OutOfMemoryError, RuntimeError) as oom_err:
+                    if "out of memory" in str(oom_err).lower() or isinstance(oom_err, torch.cuda.OutOfMemoryError):
+                        logger.warning("CUDA OOM during batch prediction, falling back to CPU: %s", oom_err)
+                        if self.device.type == "cuda":
+                            torch.cuda.empty_cache()
+                            self.device = torch.device("cpu")
+                            self.model = self.model.float().to(self.device)
+                        for c in batch_crops:
+                            results.append(self.predict_single_line(c, enable_tta=False))
+                    else:
+                        raise
+
+                i = j
+
+            for idx, (txt, conf) in enumerate(results):
                 logger.info(
                     "Recognized line %d/%d (%.1f%%): %s",
                     idx + 1,
                     total_crops,
                     conf * 100,
-                    (text[:45] + "...") if len(text) > 45 else text,
+                    (txt[:45] + "...") if len(txt) > 45 else txt,
                 )
+
         except Exception as exc:
             logger.error("Transformer batch prediction failed: %s", exc, exc_info=True)
             raise ModelInferenceException(f"Transformer batch prediction failed: {exc}") from exc

@@ -41,14 +41,23 @@ def test_extract_seam_carved_crop():
 
     seams = compute_line_seams(binary, [(15, 45), (65, 95)])
     assert len(seams) == 1
-    crop = extract_seam_carved_crop(image, binary, None, seams[0], 10, 50, 5, 195)
-    assert crop.shape[0] == 40
+    # Crop line 1 with bottom_seam = seams[0]
+    crop = extract_seam_carved_crop(image, binary, None, seams[0], 10, 60, 5, 195)
+    assert crop.shape[0] == 50
     assert crop.shape[1] == 190
+
+    # Test top seam masking: crop line 2 with top_seam = seams[0]
+    crop2 = extract_seam_carved_crop(image, binary, seams[0], None, 50, 100, 5, 195)
+    assert crop2.shape[0] == 50
+    assert crop2.shape[1] == 190
+    # The actual line 2 ink in row 70..90 of full image corresponds to row 20..40 of crop2
+    # Rows above seam should be paper white (255)
+    assert np.all(crop2[0, :] == 255)
 
 
 def test_straighten_text_line():
     crop = np.full((40, 200, 3), 255, dtype=np.uint8)
     # Draw a tilted line of text
-    cv2.putText(crop, "Тестовая строка", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
+    cv2.putText(crop, "SAMPLE TEXT LINE", (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
     straight = straighten_text_line(crop)
     assert straight.shape == crop.shape
