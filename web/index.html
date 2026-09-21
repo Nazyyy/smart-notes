@@ -126,7 +126,9 @@
   <div class="hud-scrim" id="hud-scrim"></div>
 
   <div class="hud hud-wide" id="hud-library" role="dialog" aria-modal="true" aria-labelledby="hud-lib-title">
-    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <button class="hud-close" type="button" aria-label="Закрыть">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
     <div class="hud-header-flex">
       <div>
         <div class="hud-kicker">База знаний</div>
@@ -153,13 +155,17 @@
   </div>
 
   <div class="hud" id="hud-engine" role="dialog" aria-modal="true" aria-labelledby="hud-engine-title">
-    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <button class="hud-close" type="button" aria-label="Закрыть">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
     <div class="hud-kicker">Ядро</div>
     <h3 id="hud-engine-title">Клиентский нейроконвейер документа</h3>
     <p>Детекция кириллических графов и сборка смешанного набора — рукописный текст, латиница и формулы — целиком в памяти вкладки. Ни один байт скана не уходит в сеть.</p>
   </div>
   <div class="hud" id="hud-architecture" role="dialog" aria-modal="true" aria-labelledby="hud-arch-title">
-    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <button class="hud-close" type="button" aria-label="Закрыть">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
     <div class="hud-kicker">Архитектура</div>
     <h3 id="hud-arch-title">Четыре кадра до вектора</h3>
     <ol>
@@ -170,7 +176,9 @@
     </ol>
   </div>
   <div class="hud" id="hud-benchmarks" role="dialog" aria-modal="true" aria-labelledby="hud-bench-title">
-    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <button class="hud-close" type="button" aria-label="Закрыть">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+    </button>
     <div class="hud-kicker">Замеры</div>
     <h3 id="hud-bench-title">Локальные телеметрии</h3>
     <div class="hud-metrics">
@@ -181,12 +189,13 @@
   </div>
 
   <section class="reader-screen" id="reader-screen" hidden>
-    <div class="reader-topbar">
+    <header class="reader-topbar">
       <div class="reader-nav-left">
-        <button class="btn btn-ghost btn-sm" id="btn-reader-back" type="button">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+        <button class="btn btn-ghost btn-sm" id="btn-reader-back" type="button" aria-label="Вернуться в библиотеку">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>
           <span>Библиотека</span>
         </button>
+        <div class="reader-nav-divider" aria-hidden="true"></div>
         <div class="reader-doc-meta">
           <h2 id="reader-doc-title">Кинетическая энергия</h2>
           <span class="chip-subtle" id="reader-doc-badge">Физика · 9 класс</span>
@@ -195,35 +204,49 @@
 
       <div class="reader-nav-right">
         <div class="reader-stats-cluster">
-          <span>Сжатие: <b id="reader-stat-ratio">98.2%</b></span>
-          <span>Вес: <b id="reader-stat-size">86 КБ</b></span>
+          <span>Сжатие <b id="reader-stat-ratio">98.2%</b></span>
+          <span class="stat-separator" aria-hidden="true">/</span>
+          <span>Размер <b id="reader-stat-size">86 КБ</b></span>
         </div>
-        <button class="btn btn-ghost btn-sm" id="btn-copy-md" type="button">Копировать .md</button>
-        <button class="btn btn-solid btn-sm" id="btn-download-tex" type="button">Скачать LaTeX</button>
+        <div class="reader-actions-group">
+          <button class="btn btn-ghost btn-sm" id="btn-copy-md" type="button" title="Скопировать Markdown">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Markdown</span>
+          </button>
+          <button class="btn btn-solid btn-sm" id="btn-download-tex" type="button" title="Экспорт в LaTeX">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            <span>LaTeX</span>
+          </button>
+        </div>
       </div>
-    </div>
+    </header>
 
-    <div class="reader-tabs" role="tablist" aria-label="Режим просмотра">
-      <button class="reader-tab is-active" id="tab-scan" type="button" role="tab" data-pane="scan" aria-selected="true">📸 1. Фото и этапы</button>
-      <button class="reader-tab" id="tab-segmentation" type="button" role="tab" data-pane="segmentation" aria-selected="false">📐 2. Разметка строк</button>
-      <button class="reader-tab" id="tab-editor" type="button" role="tab" data-pane="editor" aria-selected="false">🤖 3. Текст (модель)</button>
-      <button class="reader-tab" id="tab-text" type="button" role="tab" data-pane="text" aria-selected="false">📝 4. Конспект</button>
-      <button class="reader-tab" id="tab-cards" type="button" role="tab" data-pane="cards" aria-selected="false">🗂️ Карточки</button>
-      <button class="reader-tab" id="tab-cloze" type="button" role="tab" data-pane="cloze" aria-selected="false">🧩 Тренажер</button>
-      <button class="reader-tab" id="tab-quiz" type="button" role="tab" data-pane="quiz" aria-selected="false">🎯 Квиз</button>
+    <div class="reader-tabs-bar">
+      <nav class="reader-tabs" role="tablist" aria-label="Разделы документа">
+        <button class="reader-tab is-active" id="tab-scan" type="button" role="tab" data-pane="scan" aria-selected="true"><span class="tab-index">01</span><span class="tab-label">Скан и фильтры</span></button>
+        <button class="reader-tab" id="tab-segmentation" type="button" role="tab" data-pane="segmentation" aria-selected="false"><span class="tab-index">02</span><span class="tab-label">Разметка строк</span></button>
+        <button class="reader-tab" id="tab-editor" type="button" role="tab" data-pane="editor" aria-selected="false"><span class="tab-index">03</span><span class="tab-label">Распознавание</span></button>
+        <button class="reader-tab" id="tab-text" type="button" role="tab" data-pane="text" aria-selected="false"><span class="tab-index">04</span><span class="tab-label">Конспект</span></button>
+        <button class="reader-tab" id="tab-cards" type="button" role="tab" data-pane="cards" aria-selected="false"><span class="tab-index">05</span><span class="tab-label">Карточки</span></button>
+        <button class="reader-tab" id="tab-cloze" type="button" role="tab" data-pane="cloze" aria-selected="false"><span class="tab-index">06</span><span class="tab-label">Тренажер</span></button>
+        <button class="reader-tab" id="tab-quiz" type="button" role="tab" data-pane="quiz" aria-selected="false"><span class="tab-index">07</span><span class="tab-label">Тестирование</span></button>
+      </nav>
     </div>
 
     <div class="reader-workspace" id="reader-workspace" data-pane="scan">
       <!-- 1. PHOTO & TRANSFORMATIONS -->
       <div class="reader-pane reader-pane-scan">
         <div class="pane-header">
-          <span>Этапы предобработки OpenCV</span>
-          <div class="subtabs-bar" id="reader-photo-subtabs">
-            <button class="subtab-btn is-active" type="button" data-photo="orig">📷 Оригинал</button>
-            <button class="subtab-btn" type="button" data-photo="deskew">📐 Deskew</button>
-            <button class="subtab-btn" type="button" data-photo="shadow">💡 Тени</button>
-            <button class="subtab-btn" type="button" data-photo="bin">🖤 Савола</button>
+          <div class="pane-title-group">
+            <span class="pane-title">Предобработка OpenCV</span>
+            <div class="subtabs-bar" id="reader-photo-subtabs" role="tablist" aria-label="Фильтры предобработки">
+              <button class="subtab-btn is-active" type="button" data-photo="orig">Оригинал</button>
+              <button class="subtab-btn" type="button" data-photo="deskew">Выравнивание</button>
+              <button class="subtab-btn" type="button" data-photo="shadow">Подавление теней</button>
+              <button class="subtab-btn" type="button" data-photo="bin">Бинаризация</button>
+            </div>
           </div>
+          <span class="mono-tag" id="reader-scan-meta">RAW SCAN</span>
         </div>
         <div class="pane-content zoomable-wrap">
           <img id="reader-scan-img" src="assets/loupe/raw.jpg" alt="Скан конспекта" />
@@ -233,7 +256,7 @@
       <!-- 2. LINE SEGMENTATION OVERLAY & PROFILE -->
       <div class="reader-pane reader-pane-segmentation">
         <div class="pane-header">
-          <span>Карта строк (Overlay) &amp; Проекции HPP</span>
+          <span class="pane-title">Карта строк и HPP-проекция</span>
           <span class="mono-tag" id="reader-overlay-meta">HPP SEGMENTATION</span>
         </div>
         <div class="pane-content zoomable-wrap">
@@ -244,18 +267,18 @@
       <!-- 3. LINE-BY-LINE MODEL TRANSCRIBER & EDITOR -->
       <div class="reader-pane reader-pane-editor">
         <div class="pane-header">
-          <span>Построчное распознавание модели (CRNN + TrOCR)</span>
+          <span class="pane-title">Построчное распознавание нейросетью</span>
           <span class="mono-tag-accent" id="reader-lines-count">Строк: 0</span>
         </div>
-        <div class="pane-content" style="padding: 16px;">
+        <div class="pane-content lines-pane-content">
           <div class="lines-editor-table-wrap">
             <table class="lines-editor-table">
               <thead>
                 <tr>
-                  <th style="width: 50px;">№</th>
-                  <th style="width: 170px;">Вырезка (Crop)</th>
-                  <th>Распознанный текст</th>
-                  <th style="width: 140px;">Точность</th>
+                  <th style="width: 54px;">Строка</th>
+                  <th style="width: 170px;">Фрагмент</th>
+                  <th>Транскрипция</th>
+                  <th style="width: 110px;">Точность</th>
                 </tr>
               </thead>
               <tbody id="reader-lines-tbody"></tbody>
@@ -267,57 +290,75 @@
       <!-- 4. LECTURE NOTE WITH CUSTOMIZATION -->
       <div class="reader-pane reader-pane-vector">
         <div class="pane-header">
-          <span>Векторизованный конспект</span>
-          <span class="mono-tag-accent">LATEX + MARKDOWN</span>
+          <span class="pane-title">Векторизованный конспект</span>
+          <span class="mono-tag-accent">MARKDOWN + KATEX</span>
         </div>
         <div class="pane-content editorial-sheet">
           <div class="custom-controls-box">
+            <div class="custom-box-header">
+              <span class="custom-box-kicker">Параметры генерации</span>
+              <span class="custom-box-desc">Настройка объема, стиля и глубины проработки лекции</span>
+            </div>
             <div class="custom-controls-grid">
               <div class="custom-field">
-                <label>📏 Длина конспекта:</label>
-                <select id="reader-select-length" class="custom-select">
-                  <option value="medium" selected>Средний (стандарт)</option>
-                  <option value="short">Короткий (шпаргалка)</option>
-                  <option value="detailed">Подробный (исчерпывающий)</option>
-                </select>
+                <label for="reader-select-length">Объем конспекта</label>
+                <div class="select-wrapper">
+                  <select id="reader-select-length" class="custom-select">
+                    <option value="medium" selected>Средний (стандартный)</option>
+                    <option value="short">Краткий (шпаргалка-выжимка)</option>
+                    <option value="detailed">Подробный (исчерпывающий)</option>
+                  </select>
+                </div>
               </div>
               <div class="custom-field">
-                <label>🎨 Стиль («отсебятина»):</label>
-                <select id="reader-select-creativity" class="custom-select">
-                  <option value="strict" selected>Строгий (факты лекции)</option>
-                  <option value="balanced">Сбалансированный</option>
-                  <option value="creative">Креативный (аналогии)</option>
-                </select>
+                <label for="reader-select-creativity">Стиль изложения</label>
+                <div class="select-wrapper">
+                  <select id="reader-select-creativity" class="custom-select">
+                    <option value="strict" selected>Академический (строго первоисточник)</option>
+                    <option value="balanced">Сбалансированный</option>
+                    <option value="creative">Адаптивный (с аналогиями)</option>
+                  </select>
+                </div>
               </div>
               <div class="custom-field custom-checkbox-field">
-                <label><input type="checkbox" id="reader-check-enrich" /> <span>📚 Добавить расширенные факты</span></label>
+                <label class="custom-checkbox-label">
+                  <input type="checkbox" id="reader-check-enrich" class="custom-checkbox" />
+                  <span class="checkbox-box" aria-hidden="true">
+                    <svg width="10" height="8" viewBox="0 0 10 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 3.5 6.5 9 1"></polyline></svg>
+                  </span>
+                  <span class="checkbox-text">Энциклопедический контекст и факты</span>
+                </label>
               </div>
             </div>
             <div class="custom-actions-row">
-              <button class="btn btn-solid btn-sm" id="btn-reader-synthesize" type="button">✨ Синтезировать через ИИ</button>
+              <button class="btn btn-solid btn-sm" id="btn-reader-synthesize" type="button">
+                <span>Синтезировать конспект</span>
+              </button>
             </div>
           </div>
-          <div id="reader-content-body"></div>
+          <article id="reader-content-body" class="lecture-content-flow"></article>
         </div>
       </div>
 
       <!-- 5. FLASHCARDS -->
       <div class="reader-pane reader-pane-cards">
         <div class="pane-header">
-          <span>🗂️ Карточки терминов (Интервальное повторение)</span>
+          <span class="pane-title">Интервальное повторение</span>
           <span class="mono-tag" id="reader-cards-counter">Карточка 1 из 5</span>
         </div>
-        <div class="pane-content" style="padding: 24px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-          <div class="flashcard-box" id="reader-flashcard-box" role="button" tabindex="0">
-            <div class="card-side-tag" id="reader-card-side">❓ ВОПРОС / ПОНЯТИЕ</div>
-            <h3 class="card-main-text" id="reader-card-text">Термин</h3>
-            <div class="card-hint-text" id="reader-card-hint">Подсказка</div>
-            <div class="card-tap-hint">Нажмите, чтобы перевернуть ответ</div>
+        <div class="pane-content flashcards-pane-content">
+          <div class="flashcard-scene">
+            <div class="flashcard-box" id="reader-flashcard-box" role="button" tabindex="0" aria-label="Карточка для запоминания. Нажмите для переворота">
+              <div class="card-side-tag" id="reader-card-side">ТЕРМИН / ПОНЯТИЕ</div>
+              <h3 class="card-main-text" id="reader-card-text">Понятие</h3>
+              <div class="card-hint-text" id="reader-card-hint"></div>
+              <div class="card-tap-hint">Нажмите на карточку для просмотра ответа</div>
+            </div>
           </div>
-          <div class="card-nav-row" style="max-width: 440px; margin-top: 18px;">
-            <button class="btn btn-ghost btn-sm" id="btn-reader-card-prev" type="button">⬅️ Предыдущая</button>
-            <button class="btn btn-solid btn-sm" id="btn-reader-card-flip" type="button">🔄 Перевернуть ответ</button>
-            <button class="btn btn-ghost btn-sm" id="btn-reader-card-next" type="button">Следующая ➡️</button>
+          <div class="card-nav-row">
+            <button class="btn btn-ghost btn-sm" id="btn-reader-card-prev" type="button">Предыдущая</button>
+            <button class="btn btn-solid btn-sm" id="btn-reader-card-flip" type="button">Показать ответ</button>
+            <button class="btn btn-ghost btn-sm" id="btn-reader-card-next" type="button">Следующая</button>
           </div>
         </div>
       </div>
@@ -325,19 +366,19 @@
       <!-- 6. CLOZE TESTS -->
       <div class="reader-pane reader-pane-cloze">
         <div class="pane-header">
-          <span>🧩 Тренажер активного вспоминания (Вставка пропущенных слов)</span>
-          <span class="mono-tag">АКТИВНОЕ ВСПОМИНАНИЕ</span>
+          <span class="pane-title">Активное вспоминание ключевых понятий</span>
+          <span class="mono-tag">CLOZE RECALL</span>
         </div>
-        <div class="pane-content" style="padding: 24px;" id="reader-cloze-container"></div>
+        <div class="pane-content exercises-pane-content" id="reader-cloze-container"></div>
       </div>
 
       <!-- 7. QUIZ -->
       <div class="reader-pane reader-pane-quiz">
         <div class="pane-header">
-          <span>🎯 Экспресс-квиз по материалам конспекта</span>
-          <span class="mono-tag">ТЕСТИРОВАНИЕ</span>
+          <span class="pane-title">Проверочный экспресс-тест</span>
+          <span class="mono-tag">EXPRESS TEST</span>
         </div>
-        <div class="pane-content" style="padding: 24px;" id="reader-quiz-container"></div>
+        <div class="pane-content exercises-pane-content" id="reader-quiz-container"></div>
       </div>
     </div>
   </section>

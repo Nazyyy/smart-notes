@@ -552,10 +552,10 @@
           var confClass = conf >= 0.8 ? "conf-high" : (conf >= 0.55 ? "conf-med" : "conf-low");
 
           tr.innerHTML =
-            "<td><span class=\"line-num-badge\">#" + num + "</span></td>" +
+            "<td><div class=\"line-card-header\"><span class=\"line-num-badge\">#" + num + "</span><span class=\"confidence-tag " + confClass + "\">" + confPct + "%</span></div></td>" +
             "<td><img class=\"line-crop-preview\" src=\"" + cropSrc + "\" alt=\"Строка " + num + "\" onerror=\"this.style.display='none'\" /></td>" +
             "<td><input class=\"line-edit-input\" type=\"text\" value=\"" + escapeHtml(text) + "\" data-line-idx=\"" + idx + "\" /></td>" +
-            "<td><span class=\"confidence-tag " + confClass + "\">● " + confPct + "%</span></td>";
+            "<td class=\"td-conf-desktop\"><span class=\"confidence-tag " + confClass + "\">" + confPct + "%</span></td>";
 
           var inp = tr.querySelector(".line-edit-input");
           inp.addEventListener("change", function () {
@@ -608,8 +608,8 @@
     var next = $("#btn-reader-card-next");
 
     if (total === 0) {
-      if (counter) counter.textContent = "Карточки формируются...";
-      if (mainText) mainText.textContent = "Нажмите «Синтезировать через ИИ» для создания карточек";
+      if (counter) counter.textContent = "Формирование карточек...";
+      if (mainText) mainText.textContent = "Нажмите «Синтезировать конспект» для создания карточек";
       if (hintText) hintText.textContent = "";
       if (box) box.classList.remove("is-flipped");
       return;
@@ -619,11 +619,11 @@
     if (cardIndex < 0) cardIndex = 0;
 
     var c = cards[cardIndex];
-    if (counter) counter.textContent = "Карточка " + (cardIndex + 1) + " из " + total + " (" + (c.category || "Термин") + ")";
+    if (counter) counter.textContent = (cardIndex + 1) + " / " + total + " · " + (c.category || "Термин");
     if (box) box.classList.toggle("is-flipped", cardFlipped);
-    if (sideTag) sideTag.textContent = !cardFlipped ? "❓ ВОПРОС / ПОНЯТИЕ" : "💡 ОПРЕДЕЛЕНИЕ / ОТВЕТ";
+    if (sideTag) sideTag.textContent = !cardFlipped ? "ТЕРМИН / ПОНЯТИЕ" : "ОПРЕДЕЛЕНИЕ";
     if (mainText) mainText.textContent = !cardFlipped ? (c.front || "") : (c.back || "");
-    if (hintText) hintText.textContent = (!cardFlipped && c.hint) ? ("💡 Подсказка: " + c.hint) : "";
+    if (hintText) hintText.textContent = (!cardFlipped && c.hint) ? ("Подсказка: " + c.hint) : "";
     if (prev) prev.disabled = (cardIndex === 0);
     if (next) next.disabled = (cardIndex === total - 1);
   }
@@ -635,7 +635,7 @@
     container.innerHTML = "";
 
     if (tests.length === 0) {
-      container.innerHTML = "<div style=\"padding:24px; text-align:center; color:#888;\">Упражнения с пропусками создаются через ИИ. Нажмите «Синтезировать через ИИ»!</div>";
+      container.innerHTML = "<div class=\"empty-state-notice\">Материалы тренажера формируются через ИИ. Нажмите «Синтезировать конспект».</div>";
       return;
     }
 
@@ -652,9 +652,9 @@
       }).join("");
 
       card.innerHTML =
-        "<div class=\"exercise-num\">Задание " + (idx + 1) + " из " + tests.length + "</div>" +
+        "<div class=\"exercise-num\">Задание " + (idx + 1) + " / " + tests.length + "</div>" +
         "<div class=\"cloze-sentence\">" + sentenceHtml + "</div>" +
-        (t.hint ? "<div style=\"font-size:12px; color:#888; margin-bottom:8px;\">💡 Подсказка: " + escapeHtml(t.hint) + "</div>" : "") +
+        (t.hint ? "<div class=\"cloze-hint\">Подсказка: " + escapeHtml(t.hint) + "</div>" : "") +
         "<div class=\"cloze-options-grid\">" + optionsHtml + "</div>" +
         "<div class=\"validation-feedback\" style=\"display:none;\"></div>";
 
@@ -670,12 +670,12 @@
             this.classList.add("is-correct");
             feedback.style.display = "block";
             feedback.className = "validation-feedback feedback-success";
-            feedback.innerHTML = "✅ <b>Верно!</b> " + escapeHtml(t.full_sentence || t.sentence_with_blank);
+            feedback.innerHTML = "<b>Верно.</b> " + escapeHtml(t.full_sentence || t.sentence_with_blank);
           } else {
             this.classList.add("is-wrong");
             feedback.style.display = "block";
             feedback.className = "validation-feedback feedback-error";
-            feedback.innerHTML = "❌ Неверно. Правильное слово: <b>" + escapeHtml(t.target_word) + "</b>";
+            feedback.innerHTML = "Неверно. Правильный термин: <b>" + escapeHtml(t.target_word) + "</b>";
           }
         });
       });
@@ -691,7 +691,7 @@
     container.innerHTML = "";
 
     if (questions.length === 0) {
-      container.innerHTML = "<div style=\"padding:24px; text-align:center; color:#888;\">Вопросы теста генерируются через ИИ. Нажмите «Синтезировать через ИИ»!</div>";
+      container.innerHTML = "<div class=\"empty-state-notice\">Вопросы проверочного теста формируются через ИИ. Нажмите «Синтезировать конспект».</div>";
       return;
     }
 
@@ -703,7 +703,7 @@
       }).join("");
 
       card.innerHTML =
-        "<div class=\"exercise-num\">Вопрос " + (qIdx + 1) + " из " + questions.length + "</div>" +
+        "<div class=\"exercise-num\">Вопрос " + (qIdx + 1) + " / " + questions.length + "</div>" +
         "<div class=\"cloze-sentence\">" + escapeHtml(q.question) + "</div>" +
         "<div class=\"quiz-options-grid\">" + optionsHtml + "</div>" +
         "<div class=\"validation-feedback\" style=\"display:none;\"></div>";
@@ -721,14 +721,14 @@
             this.classList.add("is-correct");
             feedback.style.display = "block";
             feedback.className = "validation-feedback feedback-success";
-            feedback.innerHTML = "🎉 <b>Правильно!</b> " + escapeHtml(q.explanation || "");
+            feedback.innerHTML = "<b>Верно.</b> " + escapeHtml(q.explanation || "");
           } else {
             this.classList.add("is-wrong");
             var correctBtn = card.querySelector(".quiz-opt-btn[data-idx=\"" + correctIdx + "\"]");
             if (correctBtn) correctBtn.classList.add("is-correct");
             feedback.style.display = "block";
             feedback.className = "validation-feedback feedback-error";
-            feedback.innerHTML = "Не совсем так. Ответ: <b>" + escapeHtml(q.options[correctIdx] || "") + "</b>. " + escapeHtml(q.explanation || "");
+            feedback.innerHTML = "Неверно. Правильный ответ: <b>" + escapeHtml(q.options[correctIdx] || "") + "</b>. " + escapeHtml(q.explanation || "");
           }
         });
       });
@@ -928,7 +928,7 @@
         var btn = this;
         var origText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = "🤖 Синтез ИИ...";
+        btn.textContent = "Синтез...";
 
         var len = ($("#reader-select-length") && $("#reader-select-length").value) || "medium";
         var cr = ($("#reader-select-creativity") && $("#reader-select-creativity").value) || "strict";
@@ -959,7 +959,7 @@
                 if (kit.quiz) currentDoc.quiz = kit.quiz;
               }
               renderReaderPanes(currentDoc);
-              showToast("✨ ИИ обновил конспект и материалы!");
+              showToast("Конспект и учебные материалы обновлены");
             })
             .catch(function (e) {
               console.warn("AI synth error:", e);
@@ -973,7 +973,7 @@
           window.setTimeout(function () {
             btn.disabled = false;
             btn.textContent = origText;
-            showToast("✨ Параметры применены!");
+            showToast("Параметры генерации применены");
           }, 800);
         }
       });
@@ -1082,7 +1082,7 @@
 
       // Open in Reader Studio
       openReader(newDoc);
-      showToast("✅ Конспект успешно распознан моделью!");
+      showToast("Скан успешно распознан моделью");
 
       // Enrich kit in background
       fetch("/api/v1/documents/" + docData.id + "/interactive-kit", {
@@ -1108,7 +1108,7 @@
       stop();
       if (loupe) loupe.classList.remove("is-scanning");
       setStatus("ОШИБКА РАСПОЗНАВАНИЯ");
-      showToast("⚠️ Сбой распознавания: " + err.message);
+      showToast("Сбой распознавания: " + err.message);
     }
   }
 
