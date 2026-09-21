@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ru" style="background:#000000;">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Glyph.ai — нейровекторизация конспектов</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <!-- KaTeX CDN for real mathematical & chemical typography -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <!-- Ambient Video & Canvas Layer -->
+  <div class="video-container" id="video-container">
+    <video id="bg-video" class="hero-video" autoplay muted loop playsinline preload="metadata" poster="assets/hero-poster.jpg" aria-hidden="true">
+      <source src="assets/hero-baseline.mp4" type="video/mp4" />
+      <source src="assets/hero.webm" type="video/webm" />
+      <source src="assets/hero-h264.mp4" type="video/mp4" />
+    </video>
+    <canvas id="ambient-canvas" class="ambient-canvas" aria-hidden="true"></canvas>
+    <div class="hero-scrim"></div>
+    <div class="grain"></div>
+  </div>
+
+  <!-- Landing Shell -->
+  <div class="page" id="landing-page">
+    <div class="menu-backdrop" id="menu-backdrop"></div>
+
+    <header class="header">
+      <a class="logo" href="#top" aria-label="Glyph.ai">
+        <svg class="logo-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" fill="white"/>
+          <path d="M2 12l10 5 10-5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M2 17l10 5 10-5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="logo-text">Glyph<span class="logo-suffix">.ai</span></span>
+      </a>
+
+      <nav class="site-nav" id="site-nav" aria-label="Навигация">
+        <a class="nav-pill" href="#library">Библиотека</a>
+        <a class="nav-pill" href="#engine">Ядро</a>
+        <a class="nav-pill" href="#architecture">Архитектура</a>
+        <a class="nav-pill" href="#benchmarks">Замеры</a>
+      </nav>
+
+      <div class="header-right">
+        <button class="btn btn-solid header-cta" id="btn-open-library" type="button">Открыть библиотеку</button>
+        <button class="burger" id="burger-btn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="site-nav">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </header>
+
+    <main class="hero" id="top">
+      <div class="hero-copy">
+        <div class="badge liquid-glass">
+          <svg class="sparkle-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 1.2L9.15 6.85L14.8 8L9.15 9.15L8 14.8L6.85 9.15L1.2 8L6.85 6.85L8 1.2Z" fill="#f2f2f2"/>
+          </svg>
+          <span>Нейровекторизация конспекта v2.4</span>
+        </div>
+        <h1 class="hero-title">
+          <span class="line line-1"><span class="line-inner">Преврати <em>черновик с урока</em> в</span></span>
+          <span class="line line-2"><span class="line-inner">чистый вектор за секунды.</span></span>
+        </h1>
+        <p class="hero-lede">Клиентский пайплайн детекции кириллических конспектов. Читает смешанный почерк и формулы, собирает векторный слой и сжимает физический скан — без обращения к серверу.</p>
+        <div class="hero-actions">
+          <button class="btn btn-solid" id="btn-upload" type="button">Загрузить конспект</button>
+          <button class="btn btn-ghost" id="btn-hero-library" type="button">База конспектов</button>
+        </div>
+      </div>
+
+      <div class="loupe-col" id="loupe-col">
+        <div class="loupe" id="loupe">
+          <div class="loupe-rim" aria-hidden="true"></div>
+          <div class="loupe-prism" aria-hidden="true"></div>
+          <div class="loupe-glare" id="loupe-glare" aria-hidden="true"></div>
+          <div class="loupe-stage" id="loupe-stage" role="button" tabindex="0" aria-label="Зона сканирования: перетащите фото тетради или нажмите, чтобы выбрать файл">
+            <div class="layer layer-raw" id="layer-raw"></div>
+            <div class="layer layer-clean" id="layer-clean"></div>
+            <div class="scan-beam" id="scan-beam"></div>
+            <div class="scan-beam-v" id="scan-beam-v"></div>
+            <div class="splitter" id="splitter"><span class="handle"></span></div>
+            <div class="drop-hint" id="drop-hint">Перетащите снимок тетради</div>
+            <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/*" hidden />
+          </div>
+          <div class="loupe-optic-pill"><span class="optic-dot"></span><span id="loupe-optic-text">SPECTRAL 1200 DPI</span></div>
+          <div class="loupe-ticks" aria-hidden="true">
+            <span class="tick tick-tl"></span><span class="tick tick-tr"></span>
+            <span class="tick tick-bl"></span><span class="tick tick-br"></span>
+            <span class="frame-id">FRAME 01 / 01</span>
+          </div>
+          <div class="loupe-meta">
+            <span class="chip" id="chip-size">[ СЖАТИЕ: 4.8MB → 86KB ]</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="stats">
+      <div class="stat-item">
+        <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3.2" y="3.4" width="6.4" height="17.2" rx="3.2" stroke="#d8d8d8" stroke-width="1.5"/>
+          <rect x="14.4" y="3.4" width="6.4" height="17.2" rx="3.2" stroke="#d8d8d8" stroke-width="1.5"/>
+          <path d="M9.6 12h4.8" stroke="#d8d8d8" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>94.2% компрессия скана (WebP / вектор)</span>
+      </div>
+      <div class="stat-item">
+        <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="19" height="19" rx="4.5" fill="#f3f3f3"/>
+          <path d="M7.2 8.2h9.6M7.2 12h9.6M7.2 15.8h6.2" stroke="#111" stroke-width="1.45" stroke-linecap="round"/>
+        </svg>
+        <span>Сквозная компиляция в LaTeX и Markdown</span>
+      </div>
+      <div class="stat-item">
+        <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="8.2" stroke="#d8d8d8" stroke-width="1.5"/>
+          <path d="M8 12.2l2.4 2.4L16.2 9" stroke="#d8d8d8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>100% в браузере · 0 байт в сеть</span>
+      </div>
+    </footer>
+  </div>
+
+  <!-- HUD Modal Backdrops & Dialogs -->
+  <div class="hud-scrim" id="hud-scrim"></div>
+
+  <!-- HUD 1: Library Modal -->
+  <div class="hud hud-wide" id="hud-library" role="dialog" aria-modal="true" aria-labelledby="hud-lib-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-header-flex">
+      <div>
+        <div class="hud-kicker">База знаний</div>
+        <h3 id="hud-lib-title">Сохранённые и демонстрационные конспекты</h3>
+      </div>
+      <button class="btn btn-solid btn-sm" id="btn-lib-upload" type="button">Добавить скан</button>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>Документ</th>
+            <th>Класс / Тема</th>
+            <th>Дата</th>
+            <th>Размер</th>
+            <th>Сжатие</th>
+            <th>Статус</th>
+            <th style="text-align:right;">Действие</th>
+          </tr>
+        </thead>
+        <tbody id="library-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- HUD 2: Engine -->
+  <div class="hud" id="hud-engine" role="dialog" aria-modal="true" aria-labelledby="hud-engine-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Ядро</div>
+    <h3 id="hud-engine-title">Клиентский нейроконвейер документа</h3>
+    <p>Детекция кириллических графов и сборка смешанного набора — рукописный текст, латиница и формулы — целиком в памяти вкладки. Ни один байт скана не уходит в сеть.</p>
+  </div>
+
+  <!-- HUD 3: Architecture -->
+  <div class="hud" id="hud-architecture" role="dialog" aria-modal="true" aria-labelledby="hud-arch-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Архитектура</div>
+    <h3 id="hud-arch-title">Четыре кадра до вектора</h3>
+    <ol>
+      <li><b>01</b><span>Захват скана в GPU-холст, нормализация до 1600 px.</span></li>
+      <li><b>02</b><span>Блочный порог и нормализация кадра — чернила остаются, шум уходит.</span></li>
+      <li><b>03</b><span>Двунаправленный LSTM-декодер rus+eng. Сырые токены без словарной подмены.</span></li>
+      <li><b>04</b><span>Векторный слой + WebP. Текст живёт отдельно от пикселей.</span></li>
+    </ol>
+  </div>
+
+  <!-- HUD 4: Benchmarks -->
+  <div class="hud" id="hud-benchmarks" role="dialog" aria-modal="true" aria-labelledby="hud-bench-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Замеры</div>
+    <h3 id="hud-bench-title">Локальные телеметрии</h3>
+    <div class="hud-metrics">
+      <div><strong>94.2%</strong><span>компрессия скана</span></div>
+      <div><strong>0 API</strong><span>внешних ключей</span></div>
+      <div><strong>100%</strong><span>в браузере</span></div>
+    </div>
+  </div>
+
+  <!-- Gemini API Key Modal -->
+  <div class="hud" id="hud-gemini-key" role="dialog" aria-modal="true" aria-labelledby="hud-gemini-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Интеллектуальный сопроцессор</div>
+    <h3 id="hud-gemini-title">Ключ Google Gemini 1.5 Flash</h3>
+    <p>Для активации нейросетевого ассистента введите ключ Gemini API. Ключ сохраняется локально в памяти вашего браузера.</p>
+    <div class="key-input-row">
+      <input type="password" id="gemini-key-input" class="glass-input" placeholder="AIzaSy..." spellcheck="false" autocomplete="off" />
+      <button class="btn btn-solid btn-sm" id="btn-save-gemini-key" type="button">Сохранить</button>
+    </div>
+    <div class="key-hint">Если ключ не указан, встроенный движок переходит в автономный методический режим.</div>
+  </div>
+
+  <!-- Dedicated Reader Studio Screen -->
+  <section class="reader-screen" id="reader-screen" hidden>
+    <div class="reader-topbar">
+      <div class="reader-nav-left">
+        <button class="btn btn-ghost btn-sm" id="btn-reader-back" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span>Библиотека</span>
+        </button>
+        <div class="reader-doc-meta">
+          <h2 id="reader-doc-title">Кинетическая энергия</h2>
+          <span class="chip-subtle" id="reader-doc-badge">Физика · 9 класс</span>
+        </div>
+      </div>
+
+      <div class="reader-nav-right">
+        <div class="reader-stats-cluster">
+          <span>Сжатие: <b id="reader-stat-ratio">98.2%</b></span>
+          <span>Вес: <b id="reader-stat-size">86 КБ</b></span>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="btn-copy-md" type="button">Копировать .md</button>
+        <button class="btn btn-solid btn-sm" id="btn-download-tex" type="button">Скачать LaTeX</button>
+        <button class="btn btn-ghost btn-sm btn-icon" id="btn-open-key-modal" type="button" title="Настройки Gemini API">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1.5 1.5L16 7m-4 4l-4 4m0 0l-2-2-4 4 2 2 4-4m4-4l2 2m-2-2l4-4m-4 4l-2-2m6-6l2 2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="reader-tabs" role="tablist" aria-label="Режим просмотра">
+      <button class="reader-tab is-active" id="tab-scan" type="button" role="tab" aria-selected="true">Скан</button>
+      <button class="reader-tab" id="tab-text" type="button" role="tab" aria-selected="false">Текст</button>
+    </div>
+
+    <div class="reader-workspace" id="reader-workspace" data-pane="scan">
+      <!-- Left Pane: Original Scan Inspector -->
+      <div class="reader-pane reader-pane-scan">
+        <div class="pane-header">
+          <span>Оригинальный скан</span>
+          <div class="pane-header-actions">
+            <span class="zoom-badge" id="zoom-badge">1.0×</span>
+            <span class="mono-tag" id="reader-scan-meta">RAW SCAN · 4.8 MB</span>
+          </div>
+        </div>
+        <div class="pane-content zoomable-wrap" id="scan-zoom-wrap" title="Нажмите для увеличения 2×, перемещайте курсор для панорамирования">
+          <img id="reader-scan-img" src="assets/loupe/raw.jpg" alt="Оригинальный скан конспекта" draggable="false" />
+          <div class="zoom-hint" id="zoom-hint">Кликните для 2× зума</div>
+        </div>
+      </div>
+
+      <!-- Right Pane: Vectorized Document + Gemini Copilot -->
+      <div class="reader-pane reader-pane-vector">
+        <div class="pane-header">
+          <span>Векторизованный конспект</span>
+          <div class="pane-header-actions">
+            <span class="mono-tag-accent">LATEX + MARKDOWN</span>
+          </div>
+        </div>
+        <div class="pane-content editorial-sheet-scroll" id="reader-content-scroll">
+          <div class="editorial-sheet" id="reader-content-body"></div>
+
+          <!-- Embedded Gemini Neural Assistant Drawer -->
+          <div class="gemini-drawer" id="gemini-drawer">
+            <div class="gemini-header">
+              <div class="gemini-title-group">
+                <svg class="gemini-sparkle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <path d="M12 3c0 4.5-3.5 8-8 8 4.5 0 8 3.5 8 8 0-4.5 3.5-8 8-8-4.5 0-8-3.5-8-8z"/>
+                </svg>
+                <div class="gemini-header-text">
+                  <span class="gemini-kicker">Интеллект конспекта</span>
+                  <h4 class="gemini-title">Gemini Neural Copilot</h4>
+                </div>
+              </div>
+              <span class="gemini-status-pill" id="gemini-status-pill">
+                <span class="status-dot"></span>
+                <span id="gemini-status-text">Готов к работе</span>
+              </span>
+            </div>
+
+            <div class="gemini-pills">
+              <button class="ai-pill" id="pill-summary" type="button" data-type="summary">
+                <span class="pill-icon">⚡</span>
+                <span>Краткий пересказ</span>
+              </button>
+              <button class="ai-pill" id="pill-exam" type="button" data-type="exam_questions">
+                <span class="pill-icon">🎓</span>
+                <span>Вопросы к экзамену</span>
+              </button>
+              <button class="ai-pill" id="pill-glossary" type="button" data-type="glossary">
+                <span class="pill-icon">📖</span>
+                <span>Разбор терминов</span>
+              </button>
+            </div>
+
+            <div class="gemini-custom-row">
+              <input type="text" id="gemini-custom-input" class="gemini-input" placeholder="Задать собственный вопрос по конспекту..." />
+              <button class="btn btn-solid btn-sm" id="btn-gemini-submit" type="button">Спросить</button>
+            </div>
+
+            <div class="gemini-response-wrap" id="gemini-response-wrap" hidden>
+              <div class="gemini-response-head">
+                <span class="gemini-response-label" id="gemini-response-label">Ответ ассистента</span>
+                <button class="gemini-copy-btn" id="btn-copy-gemini" type="button">Копировать</button>
+              </div>
+              <div class="gemini-response-body" id="gemini-response-body"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Notification Toast -->
+  <div class="copy-toast" id="copy-toast" role="status" aria-live="polite"></div>
+
+  <!-- KaTeX JavaScript CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
+  <!-- Local Tesseract OCR Engine -->
+  <script src="vendor/tesseract/tesseract.min.js"></script>
+  <!-- Core Pipeline & Client App -->
+  <script src="js/engine.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
