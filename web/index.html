@@ -3,377 +3,348 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Умный конспект | AI Handwritten Notes</title>
+  <title>Glyph.ai — нейровекторизация конспектов</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-  <!-- KaTeX CDN for real mathematical & chemical typography -->
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="css/app.css" />
 </head>
-<body data-view="home">
-  <!-- Ambient Video Layer (plays continuously) -->
+<body>
   <div class="video-container" id="video-container">
-    <video id="bg-video" class="hero-video" autoplay muted loop playsinline preload="auto" poster="assets/hero-poster.jpg" aria-hidden="true">
+    <video id="bg-video" class="hero-video" autoplay muted loop playsinline preload="metadata" poster="assets/hero-poster.jpg" aria-hidden="true">
       <source src="assets/hero-baseline.mp4" type="video/mp4" />
       <source src="assets/hero.webm" type="video/webm" />
       <source src="assets/hero-h264.mp4" type="video/mp4" />
     </video>
+    <canvas id="ambient-canvas" class="ambient-canvas" aria-hidden="true"></canvas>
     <div class="hero-scrim"></div>
     <div class="grain"></div>
   </div>
 
-  <!-- Page Wrapper -->
-  <div class="page" id="main-page">
+  <div class="page">
     <div class="menu-backdrop" id="menu-backdrop"></div>
 
-    <!-- Header Navigation -->
     <header class="header">
-      <a class="logo" href="#top" aria-label="Smart Notes">
+      <a class="logo" href="#top" aria-label="Glyph.ai">
         <svg class="logo-mark" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M12 2L2 7l10 5 10-5-10-5z" fill="white"/>
           <path d="M2 12l10 5 10-5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
           <path d="M2 17l10 5 10-5" stroke="white" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
-        <span class="logo-text">Умный конспект<span class="logo-suffix">.ai</span></span>
+        <span class="logo-text">Glyph<span class="logo-suffix">.ai</span></span>
       </a>
 
-      <div class="header-center">
-        <span class="engine-badge" id="backend-status-badge">
-          <span class="engine-dot"></span>
-          <span id="backend-status-text">🟢 Модель: HybridEnsemble (CRNN + TrOCR)</span>
-        </span>
-      </div>
+      <nav class="site-nav" id="site-nav" aria-label="Навигация">
+        <a class="nav-pill" href="#library">Библиотека</a>
+        <a class="nav-pill" href="#engine">Ядро</a>
+        <a class="nav-pill" href="#architecture">Архитектура</a>
+        <a class="nav-pill" href="#benchmarks">Замеры</a>
+      </nav>
 
       <div class="header-right">
-        <button class="btn btn-ghost btn-sm btn-icon" id="btn-open-gemini-modal" type="button" title="Настройки API / LLM">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 2l-2 2m-1.5 1.5L16 7m-4 4l-4 4m0 0l-2-2-4 4 2 2 4-4m4-4l2 2m-2-2l4-4m-4 4l-2-2m6-6l2 2"/></svg>
-        </button>
-        <button class="btn btn-solid btn-sm header-cta" id="btn-scroll-upload" type="button">Загрузить скан</button>
-        <button class="burger" id="burger-btn" type="button" aria-label="Открыть меню" aria-expanded="false">
+        <button class="btn btn-solid header-cta" id="btn-open-library" type="button">Открыть библиотеку</button>
+        <button class="burger" id="burger-btn" type="button" aria-label="Открыть меню" aria-expanded="false" aria-controls="site-nav">
           <span></span><span></span><span></span>
         </button>
       </div>
     </header>
 
-    <!-- Main Container -->
-    <main class="app-main-content">
-      <!-- 1. Hero Ingestion & Quick Loader Card -->
-      <section class="ingest-card liquid-glass" id="ingest-section">
-        <div class="ingest-header">
-          <div class="badge-row">
-            <span class="stage-tag">НЕЙРОКОНВЕЙЕР</span>
-            <span class="mono-badge">OPENCV + CRNN + LLM</span>
+    <main class="hero" id="top">
+      <div class="hero-copy">
+        <div class="badge liquid-glass">
+          <svg class="sparkle-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M8 1.2L9.15 6.85L14.8 8L9.15 9.15L8 14.8L6.85 9.15L1.2 8L6.85 6.85L8 1.2Z" fill="#f2f2f2"/>
+          </svg>
+          <span>Нейровекторизация конспекта v2.4</span>
+        </div>
+        <h1 class="hero-title">
+          <span class="line line-1"><span class="line-inner">Преврати <em>черновик с урока</em> в</span></span>
+          <span class="line line-2"><span class="line-inner">чистый вектор за секунды.</span></span>
+        </h1>
+        <p class="hero-lede">Клиентский пайплайн детекции кириллических конспектов. Читает смешанный почерк и формулы, собирает векторный слой и сжимает физический скан — без обращения к серверу.</p>
+        <div class="hero-actions">
+          <button class="btn btn-solid" id="btn-upload" type="button">Загрузить конспект</button>
+          <button class="btn btn-ghost" id="btn-hero-library" type="button">База конспектов</button>
+        </div>
+      </div>
+
+      <div class="loupe-col" id="loupe-col">
+        <div class="loupe" id="loupe">
+          <div class="loupe-rim" aria-hidden="true"></div>
+          <div class="loupe-prism" aria-hidden="true"></div>
+          <div class="loupe-glare" id="loupe-glare" aria-hidden="true"></div>
+          <div class="loupe-stage" id="loupe-stage" role="button" tabindex="0" aria-label="Зона сканирования: перетащите фото тетради или нажмите, чтобы выбрать файл">
+            <div class="layer layer-raw" id="layer-raw"></div>
+            <div class="layer layer-clean" id="layer-clean"></div>
+            <div class="scan-beam" id="scan-beam"></div>
+            <div class="scan-beam-v" id="scan-beam-v"></div>
+            <div class="splitter" id="splitter"><span class="handle"></span></div>
+            <div class="drop-hint" id="drop-hint">Перетащите снимок тетради</div>
+            <input id="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/*" hidden />
           </div>
-          <h1 class="ingest-title">Распознавание рукописных конспектов</h1>
-          <p class="ingest-lede">Загрузите снимок страницы тетради. Наша нейросеть нормализует геометрию, сегментирует строки, распознает текст со сложным почерком и сгенерирует учебный комплект.</p>
-        </div>
-
-        <!-- Ingestion Form & Dropzone -->
-        <div class="upload-dropzone" id="upload-dropzone" role="button" tabindex="0" aria-label="Зона загрузки конспекта">
-          <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/heic" hidden />
-          <div class="dropzone-inner">
-            <div class="dropzone-icon">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-            </div>
-            <div class="dropzone-text">
-              <strong>Перетащите фотографию страницы</strong> или <span>выберите файл</span>
-            </div>
-            <div class="dropzone-hint">Поддерживаются JPG, PNG, WEBP любого разрешения со смартфона</div>
+          <div class="loupe-optic-pill"><span class="optic-dot"></span><span id="loupe-optic-text">SPECTRAL 1200 DPI</span></div>
+          <div class="loupe-ticks" aria-hidden="true">
+            <span class="tick tick-tl"></span><span class="tick tick-tr"></span>
+            <span class="tick tick-bl"></span><span class="tick tick-br"></span>
+            <span class="frame-id">FRAME 01 / 01</span>
           </div>
-        </div>
-
-        <div class="ingest-controls-row">
-          <input type="text" id="doc-title-input" class="glass-input title-input" placeholder="Название документа (например: Физика. Лекция 4)" />
-          <button class="btn btn-solid" id="btn-trigger-upload" type="button">
-            <span>🚀 Распознать через модель</span>
-          </button>
-        </div>
-
-        <!-- Quick Demo Selectors -->
-        <div class="quick-samples-wrap">
-          <span class="samples-label">Быстрые примеры из базы:</span>
-          <div class="samples-pills">
-            <button class="sample-pill is-active" type="button" data-sample="phys-kinetics-01">⚡ Кинетическая энергия</button>
-            <button class="sample-pill" type="button" data-sample="phys-newton-01">🍎 Законы Ньютона</button>
-            <button class="sample-pill" type="button" data-sample="chem-sol-01">🧪 Растворы и концентрации</button>
-            <button class="sample-pill" type="button" data-sample="hist-1812-01">⚔️ Война 1812 года</button>
-            <button class="sample-pill" type="button" data-sample="bio-cell-01">🔬 Строение клетки</button>
-            <button class="sample-pill" type="button" data-sample="lit-onegin-01">📖 Евгений Онегин</button>
+          <div class="loupe-meta">
+            <span class="chip" id="chip-size">[ СЖАТИЕ: 4.8MB → 86KB ]</span>
           </div>
         </div>
-      </section>
+      </div>
+    </main>
 
-      <!-- 2. Active Document Workspace (4 Streamlit Stages) -->
-      <section class="workspace-card" id="workspace-section">
-        <!-- Document Topbar -->
-        <div class="doc-topbar">
-          <div class="doc-info-block">
-            <h2 class="active-doc-title" id="active-doc-title">Кинетическая энергия</h2>
-            <div class="doc-meta-tags">
-              <span class="chip" id="active-doc-subject">Физика · 9 класс</span>
-              <span class="chip-status" id="active-doc-status">🟢 Распознано</span>
-              <span class="chip-date" id="active-doc-date">21.01.2026</span>
-            </div>
-          </div>
-          <div class="doc-actions-cluster">
-            <button class="btn btn-ghost btn-sm" id="btn-reprocess" type="button">🔄 Перераспознать</button>
-            <button class="btn btn-ghost btn-sm" id="btn-export-md" type="button">📥 Скачать .md</button>
-            <button class="btn btn-ghost btn-sm" id="btn-export-tex" type="button">📑 Скачать LaTeX</button>
-            <button class="btn btn-ghost btn-sm" id="btn-export-txt" type="button">📄 Скачать .txt</button>
-          </div>
+    <footer class="stats">
+      <div class="stat-item">
+        <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3.2" y="3.4" width="6.4" height="17.2" rx="3.2" stroke="#d8d8d8" stroke-width="1.5"/>
+          <rect x="14.4" y="3.4" width="6.4" height="17.2" rx="3.2" stroke="#d8d8d8" stroke-width="1.5"/>
+          <path d="M9.6 12h4.8" stroke="#d8d8d8" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>94.2% компрессия скана (WebP / вектор)</span>
+      </div>
+      <div class="stat-item">
+        <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="2.5" y="2.5" width="19" height="19" rx="4.5" fill="#f3f3f3"/>
+          <path d="M7.2 8.2h9.6M7.2 12h9.6M7.2 15.8h6.2" stroke="#111" stroke-width="1.45" stroke-linecap="round"/>
+        </svg>
+        <span>Сквозная компиляция в LaTeX и Markdown</span>
+      </div>
+      <div class="stat-item">
+        <svg class="stat-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="12" r="8.2" stroke="#d8d8d8" stroke-width="1.5"/>
+          <path d="M8 12.2l2.4 2.4L16.2 9" stroke="#d8d8d8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>100% в браузере · 0 байт в сеть</span>
+      </div>
+    </footer>
+  </div>
+
+  <div class="hud-scrim" id="hud-scrim"></div>
+
+  <div class="hud hud-wide" id="hud-library" role="dialog" aria-modal="true" aria-labelledby="hud-lib-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-header-flex">
+      <div>
+        <div class="hud-kicker">База знаний</div>
+        <h3 id="hud-lib-title">Сохранённые и демонстрационные конспекты</h3>
+      </div>
+      <button class="btn btn-solid btn-sm" id="btn-lib-upload" type="button">Добавить скан</button>
+    </div>
+    <div class="table-wrap">
+      <table class="glass-table">
+        <thead>
+          <tr>
+            <th>Документ</th>
+            <th>Класс / Тема</th>
+            <th>Дата</th>
+            <th>Размер</th>
+            <th>Сжатие</th>
+            <th>Статус</th>
+            <th style="text-align:right;">Действие</th>
+          </tr>
+        </thead>
+        <tbody id="library-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="hud" id="hud-engine" role="dialog" aria-modal="true" aria-labelledby="hud-engine-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Ядро</div>
+    <h3 id="hud-engine-title">Клиентский нейроконвейер документа</h3>
+    <p>Детекция кириллических графов и сборка смешанного набора — рукописный текст, латиница и формулы — целиком в памяти вкладки. Ни один байт скана не уходит в сеть.</p>
+  </div>
+  <div class="hud" id="hud-architecture" role="dialog" aria-modal="true" aria-labelledby="hud-arch-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Архитектура</div>
+    <h3 id="hud-arch-title">Четыре кадра до вектора</h3>
+    <ol>
+      <li><b>01</b><span>Захват скана в GPU-холст, нормализация до 1600 px.</span></li>
+      <li><b>02</b><span>Блочный порог и нормализация кадра — чернила остаются, шум уходит.</span></li>
+      <li><b>03</b><span>LSTM rus+eng, PSM 6. Сырые токены без словарной подмены.</span></li>
+      <li><b>04</b><span>Векторный слой + WebP. Текст живёт отдельно от пикселей.</span></li>
+    </ol>
+  </div>
+  <div class="hud" id="hud-benchmarks" role="dialog" aria-modal="true" aria-labelledby="hud-bench-title">
+    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
+    <div class="hud-kicker">Замеры</div>
+    <h3 id="hud-bench-title">Локальные телеметрии</h3>
+    <div class="hud-metrics">
+      <div><strong>94.2%</strong><span>компрессия скана</span></div>
+      <div><strong>0 API</strong><span>внешних ключей</span></div>
+      <div><strong>100%</strong><span>в браузере</span></div>
+    </div>
+  </div>
+
+  <section class="reader-screen" id="reader-screen" hidden>
+    <div class="reader-topbar">
+      <div class="reader-nav-left">
+        <button class="btn btn-ghost btn-sm" id="btn-reader-back" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          <span>Библиотека</span>
+        </button>
+        <div class="reader-doc-meta">
+          <h2 id="reader-doc-title">Кинетическая энергия</h2>
+          <span class="chip-subtle" id="reader-doc-badge">Физика · 9 класс</span>
         </div>
+      </div>
 
-        <!-- 4 Main Stages Tabs -->
-        <div class="stage-tabs-bar" role="tablist" aria-label="Этапы конвейера">
-          <button class="stage-tab is-active" id="tab-btn-1" type="button" role="tab" data-stage="stage-1" aria-selected="true">
-            <span class="tab-emoji">📸</span>
-            <span>1. Фото и преобразования</span>
-          </button>
-          <button class="stage-tab" id="tab-btn-2" type="button" role="tab" data-stage="stage-2" aria-selected="false">
-            <span class="tab-emoji">📐</span>
-            <span>2. Разметка строк</span>
-          </button>
-          <button class="stage-tab" id="tab-btn-3" type="button" role="tab" data-stage="stage-3" aria-selected="false">
-            <span class="tab-emoji">🤖</span>
-            <span>3. Текст + Алгоритмы &amp; LLM</span>
-          </button>
-          <button class="stage-tab" id="tab-btn-4" type="button" role="tab" data-stage="stage-4" aria-selected="false">
-            <span class="tab-emoji">📝</span>
-            <span>4. Итоговый результат</span>
-          </button>
+      <div class="reader-nav-right">
+        <div class="reader-stats-cluster">
+          <span>Сжатие: <b id="reader-stat-ratio">98.2%</b></span>
+          <span>Вес: <b id="reader-stat-size">86 КБ</b></span>
         </div>
+        <button class="btn btn-ghost btn-sm" id="btn-copy-md" type="button">Копировать .md</button>
+        <button class="btn btn-solid btn-sm" id="btn-download-tex" type="button">Скачать LaTeX</button>
+      </div>
+    </div>
 
-        <!-- STAGE 1: Photo & Transformations -->
-        <div class="stage-pane is-active" id="pane-stage-1" role="tabpanel">
-          <div class="subtabs-bar" id="photo-subtabs">
+    <div class="reader-tabs" role="tablist" aria-label="Режим просмотра">
+      <button class="reader-tab is-active" id="tab-scan" type="button" role="tab" data-pane="scan" aria-selected="true">📸 1. Фото и этапы</button>
+      <button class="reader-tab" id="tab-segmentation" type="button" role="tab" data-pane="segmentation" aria-selected="false">📐 2. Разметка строк</button>
+      <button class="reader-tab" id="tab-editor" type="button" role="tab" data-pane="editor" aria-selected="false">🤖 3. Текст (модель)</button>
+      <button class="reader-tab" id="tab-text" type="button" role="tab" data-pane="text" aria-selected="false">📝 4. Конспект</button>
+      <button class="reader-tab" id="tab-cards" type="button" role="tab" data-pane="cards" aria-selected="false">🗂️ Карточки</button>
+      <button class="reader-tab" id="tab-cloze" type="button" role="tab" data-pane="cloze" aria-selected="false">🧩 Тренажер</button>
+      <button class="reader-tab" id="tab-quiz" type="button" role="tab" data-pane="quiz" aria-selected="false">🎯 Квиз</button>
+    </div>
+
+    <div class="reader-workspace" id="reader-workspace" data-pane="scan">
+      <!-- 1. PHOTO & TRANSFORMATIONS -->
+      <div class="reader-pane reader-pane-scan">
+        <div class="pane-header">
+          <span>Этапы предобработки OpenCV</span>
+          <div class="subtabs-bar" id="reader-photo-subtabs">
             <button class="subtab-btn is-active" type="button" data-photo="orig">📷 Оригинал</button>
-            <button class="subtab-btn" type="button" data-photo="deskew">📐 Выравнивание (Deskew)</button>
-            <button class="subtab-btn" type="button" data-photo="shadow">💡 Подавление теней</button>
-            <button class="subtab-btn" type="button" data-photo="bin">🖤 Бинаризация (Савола)</button>
-          </div>
-          <div class="stage-photo-display">
-            <div class="photo-info-bar" id="photo-stage-info">Оригинальная фотография со смартфона</div>
-            <div class="photo-view-box">
-              <img id="stage-photo-img" src="assets/loupe/raw.jpg" alt="Этап преобразования изображения" />
-            </div>
+            <button class="subtab-btn" type="button" data-photo="deskew">📐 Deskew</button>
+            <button class="subtab-btn" type="button" data-photo="shadow">💡 Тени</button>
+            <button class="subtab-btn" type="button" data-photo="bin">🖤 Савола</button>
           </div>
         </div>
-
-        <!-- STAGE 2: Line Segmentation -->
-        <div class="stage-pane" id="pane-stage-2" role="tabpanel">
-          <div class="stage-grid-two">
-            <div class="grid-card">
-              <div class="card-head">
-                <h4>🗺️ Карта расположения строк (Overlay)</h4>
-                <span class="head-tag" id="lines-count-tag">Строк: 6</span>
-              </div>
-              <p class="card-desc">Каждая обнаруженная строка пронумерована алгоритмом проекционного профилирования (HPP). Номера соответствуют строкам во вкладке «3. Текст».</p>
-              <div class="overlay-viewer">
-                <img id="stage-overlay-img" src="assets/loupe/clean.jpg" alt="Карта сегментации строк" />
-              </div>
-            </div>
-            <div class="grid-card">
-              <div class="card-head">
-                <h4>📊 Проекционный профиль и детализация</h4>
-              </div>
-              <div class="lines-metrics-card">
-                <div class="metric-row"><span>Алгоритм детекции:</span><b>Horizontal Projection Profile + Otsu</b></div>
-                <div class="metric-row"><span>Слияние десцендеров:</span><b>Активно (merged_intervals)</b></div>
-                <div class="metric-row"><span>Фильтрация тетрадной сетки:</span><b>tighten_line_crop</b></div>
-                <div class="metric-row"><span>Средняя высота строки:</span><b>48 px</b></div>
-              </div>
-              <div class="line-chips-preview" id="line-chips-container">
-                <!-- Cropped lines list generated dynamically -->
-              </div>
-            </div>
-          </div>
+        <div class="pane-content zoomable-wrap">
+          <img id="reader-scan-img" src="assets/loupe/raw.jpg" alt="Скан конспекта" />
         </div>
+      </div>
 
-        <!-- STAGE 3: Line Text Transcription & LLM Corrector -->
-        <div class="stage-pane" id="pane-stage-3" role="tabpanel">
-          <div class="corrector-summary-bar">
-            <div class="corrector-title">
-              <span class="ai-sparkle">✨</span>
-              <span>Контекстный корректор нейросети (LLM &amp; NLP)</span>
-            </div>
-            <span class="corrector-stats" id="corrector-stats-pill">Обработано строк: 6 · Найдено исправлений: 0</span>
-          </div>
+      <!-- 2. LINE SEGMENTATION OVERLAY & PROFILE -->
+      <div class="reader-pane reader-pane-segmentation">
+        <div class="pane-header">
+          <span>Карта строк (Overlay) &amp; Проекции HPP</span>
+          <span class="mono-tag" id="reader-overlay-meta">HPP SEGMENTATION</span>
+        </div>
+        <div class="pane-content zoomable-wrap">
+          <img id="reader-overlay-img" src="assets/loupe/clean.jpg" alt="Разметка строк" />
+        </div>
+      </div>
+
+      <!-- 3. LINE-BY-LINE MODEL TRANSCRIBER & EDITOR -->
+      <div class="reader-pane reader-pane-editor">
+        <div class="pane-header">
+          <span>Построчное распознавание модели (CRNN + TrOCR)</span>
+          <span class="mono-tag-accent" id="reader-lines-count">Строк: 0</span>
+        </div>
+        <div class="pane-content" style="padding: 16px;">
           <div class="lines-editor-table-wrap">
             <table class="lines-editor-table">
               <thead>
                 <tr>
-                  <th style="width: 70px;">№</th>
-                  <th style="width: 200px;">Вырезка строки (Crop)</th>
-                  <th>Распознанный текст модели</th>
-                  <th style="width: 170px;">Точность</th>
+                  <th style="width: 50px;">№</th>
+                  <th style="width: 170px;">Вырезка (Crop)</th>
+                  <th>Распознанный текст</th>
+                  <th style="width: 140px;">Точность</th>
                 </tr>
               </thead>
-              <tbody id="lines-editor-tbody">
-                <!-- Dynamically populated line by line -->
-              </tbody>
+              <tbody id="reader-lines-tbody"></tbody>
             </table>
           </div>
         </div>
+      </div>
 
-        <!-- STAGE 4: Final Result & Interactive Study Kit -->
-        <div class="stage-pane" id="pane-stage-4" role="tabpanel">
-          <!-- Customization Settings Box -->
-          <div class="customization-box">
-            <div class="customization-head">
-              <h4>⚙️ Настройки кастомизации конспекта (Объем, факты, стиль)</h4>
-              <span class="custom-toggle-hint">Параметры генерации ИИ</span>
-            </div>
+      <!-- 4. LECTURE NOTE WITH CUSTOMIZATION -->
+      <div class="reader-pane reader-pane-vector">
+        <div class="pane-header">
+          <span>Векторизованный конспект</span>
+          <span class="mono-tag-accent">LATEX + MARKDOWN</span>
+        </div>
+        <div class="pane-content editorial-sheet">
+          <div class="custom-controls-box">
             <div class="custom-controls-grid">
               <div class="custom-field">
-                <label for="select-length">📏 Длина конспекта:</label>
-                <select id="select-length" class="glass-select">
+                <label>📏 Длина конспекта:</label>
+                <select id="reader-select-length" class="custom-select">
                   <option value="medium" selected>Средний (стандарт)</option>
                   <option value="short">Короткий (шпаргалка)</option>
                   <option value="detailed">Подробный (исчерпывающий)</option>
                 </select>
               </div>
               <div class="custom-field">
-                <label for="select-creativity">🎨 Стиль изложения («отсебятина»):</label>
-                <select id="select-creativity" class="glass-select">
-                  <option value="strict" selected>Строгий (только факты лекции)</option>
-                  <option value="balanced">Сбалансированный (понятный научный)</option>
-                  <option value="creative">Креативный (жизненные аналогии)</option>
+                <label>🎨 Стиль («отсебятина»):</label>
+                <select id="reader-select-creativity" class="custom-select">
+                  <option value="strict" selected>Строгий (факты лекции)</option>
+                  <option value="balanced">Сбалансированный</option>
+                  <option value="creative">Креативный (аналогии)</option>
                 </select>
               </div>
-              <div class="custom-field checkbox-field">
-                <label class="custom-checkbox-label">
-                  <input type="checkbox" id="check-enrich-facts" />
-                  <span>📚 Добавить расширенные факты</span>
-                </label>
+              <div class="custom-field custom-checkbox-field">
+                <label><input type="checkbox" id="reader-check-enrich" /> <span>📚 Добавить расширенные факты</span></label>
               </div>
             </div>
             <div class="custom-actions-row">
-              <button class="btn btn-solid btn-sm" id="btn-synthesize-ai" type="button">
-                <span>✨ Синтезировать конспект через ИИ</span>
-              </button>
-              <button class="btn btn-ghost btn-sm" id="btn-quick-algo" type="button">
-                <span>⚡ Быстрое алгоритмическое сведение</span>
-              </button>
+              <button class="btn btn-solid btn-sm" id="btn-reader-synthesize" type="button">✨ Синтезировать через ИИ</button>
             </div>
           </div>
+          <div id="reader-content-body"></div>
+        </div>
+      </div>
 
-          <!-- Subtabs Bar for Result Types -->
-          <div class="result-subtabs-bar" role="tablist">
-            <button class="res-subtab is-active" type="button" data-result="note">📖 Конспект лекции</button>
-            <button class="res-subtab" type="button" data-result="cards">🗂️ Карточки (Flashcards)</button>
-            <button class="res-subtab" type="button" data-result="cloze">🧩 Тренажер с пропусками</button>
-            <button class="res-subtab" type="button" data-result="quiz">🎯 Экспресс-квиз</button>
+      <!-- 5. FLASHCARDS -->
+      <div class="reader-pane reader-pane-cards">
+        <div class="pane-header">
+          <span>🗂️ Карточки терминов (Интервальное повторение)</span>
+          <span class="mono-tag" id="reader-cards-counter">Карточка 1 из 5</span>
+        </div>
+        <div class="pane-content" style="padding: 24px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+          <div class="flashcard-box" id="reader-flashcard-box" role="button" tabindex="0">
+            <div class="card-side-tag" id="reader-card-side">❓ ВОПРОС / ПОНЯТИЕ</div>
+            <h3 class="card-main-text" id="reader-card-text">Термин</h3>
+            <div class="card-hint-text" id="reader-card-hint">Подсказка</div>
+            <div class="card-tap-hint">Нажмите, чтобы перевернуть ответ</div>
           </div>
-
-          <!-- SUBTAB 1: LECTURE NOTE -->
-          <div class="res-pane is-active" id="res-pane-note">
-            <div class="editorial-sheet" id="rendered-note-body">
-              <!-- Rendered with KaTeX -->
-            </div>
-            <details class="raw-markdown-details">
-              <summary>🔍 Показать исходный код Markdown</summary>
-              <pre><code id="raw-markdown-code"></code></pre>
-            </details>
-          </div>
-
-          <!-- SUBTAB 2: FLASHCARDS (3D FLIP CARDS) -->
-          <div class="res-pane" id="res-pane-cards">
-            <div class="flashcards-stage">
-              <div class="cards-header">
-                <div>
-                  <h3 class="cards-title">🗂️ Карточки для запоминания терминов и понятий</h3>
-                  <p class="cards-subtitle">Интервальное повторение ключевых определений лекции.</p>
-                </div>
-                <button class="btn btn-ghost btn-sm" id="btn-regen-cards" type="button">🔄 Перегенерировать</button>
-              </div>
-
-              <div class="card-progress-bar-wrap">
-                <div class="card-progress-fill" id="card-progress-fill" style="width: 20%;"></div>
-              </div>
-              <div class="card-counter-label" id="card-counter-label">Карточка 1 из 5 (Определение)</div>
-
-              <!-- 3D Interactive Flip Card -->
-              <div class="flashcard-box" id="flashcard-box" role="button" tabindex="0" title="Нажмите, чтобы перевернуть карточку">
-                <div class="card-side-tag" id="card-side-tag">❓ ВОПРОС / ПОНЯТИЕ</div>
-                <h3 class="card-main-text" id="card-main-text">Кинетическая энергия</h3>
-                <div class="card-hint-text" id="card-hint-text">💡 Подсказка: зависит от массы и скорости</div>
-                <div class="card-tap-hint">Кликните по карточке для переворота</div>
-              </div>
-
-              <!-- Controls: Prev, Flip, Next -->
-              <div class="card-nav-row">
-                <button class="btn btn-ghost" id="btn-card-prev" type="button" disabled>⬅️ Предыдущая</button>
-                <button class="btn btn-solid" id="btn-card-flip" type="button">🔄 Перевернуть ответ</button>
-                <button class="btn btn-ghost" id="btn-card-next" type="button">Следующая ➡️</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- SUBTAB 3: CLOZE TESTS (FILL IN THE BLANKS) -->
-          <div class="res-pane" id="res-pane-cloze">
-            <div class="cloze-stage">
-              <div class="cloze-header">
-                <h3 class="cards-title">🧩 Тренажер активного вспоминания (Вставка пропущенных слов)</h3>
-                <p class="cards-subtitle">Проверьте, насколько точно вы помните ключевые понятия лекции без подсказок.</p>
-              </div>
-              <div class="cloze-items-list" id="cloze-items-container">
-                <!-- Dynamically populated exercises with instant validation -->
-              </div>
-            </div>
-          </div>
-
-          <!-- SUBTAB 4: QUICK QUIZ -->
-          <div class="res-pane" id="res-pane-quiz">
-            <div class="quiz-stage">
-              <div class="quiz-header">
-                <h3 class="cards-title">🎯 Экспресс-квиз по материалам конспекта</h3>
-                <p class="cards-subtitle">Быстрая проверка понимания взаимосвязей и сущностей темы.</p>
-              </div>
-              <div class="quiz-items-list" id="quiz-items-container">
-                <!-- Dynamically populated multiple choice questions -->
-              </div>
-            </div>
+          <div class="card-nav-row" style="max-width: 440px; margin-top: 18px;">
+            <button class="btn btn-ghost btn-sm" id="btn-reader-card-prev" type="button">⬅️ Предыдущая</button>
+            <button class="btn btn-solid btn-sm" id="btn-reader-card-flip" type="button">🔄 Перевернуть ответ</button>
+            <button class="btn btn-ghost btn-sm" id="btn-reader-card-next" type="button">Следующая ➡️</button>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
 
-    <!-- Footer Stats -->
-    <footer class="stats">
-      <div class="stat-item">
-        <span>⚡ <b>HybridEnsemble</b>: CRNN + TrOCR + BiGRU</span>
+      <!-- 6. CLOZE TESTS -->
+      <div class="reader-pane reader-pane-cloze">
+        <div class="pane-header">
+          <span>🧩 Тренажер активного вспоминания (Вставка пропущенных слов)</span>
+          <span class="mono-tag">АКТИВНОЕ ВСПОМИНАНИЕ</span>
+        </div>
+        <div class="pane-content" style="padding: 24px;" id="reader-cloze-container"></div>
       </div>
-      <div class="stat-item">
-        <span>📐 <b>OpenCV</b>: Deskew, Shadow suppression, Savola</span>
-      </div>
-      <div class="stat-item">
-        <span>🧠 <b>LLM</b>: nex-n2.5-pro / Gemini Contextual Corrector</span>
-      </div>
-    </footer>
-  </div>
 
-  <!-- API Key Modal -->
-  <div class="hud" id="hud-gemini-key" role="dialog" aria-modal="true" aria-labelledby="hud-gemini-title">
-    <button class="hud-close" type="button" aria-label="Закрыть">✕</button>
-    <div class="hud-kicker">Интеллектуальный сопроцессор</div>
-    <h3 id="hud-gemini-title">Настройки Gemini / OpenRouter API</h3>
-    <p>Для активации нейросетевого синтеза введите ключ API. Ключ сохраняется локально в браузере.</p>
-    <div class="key-input-row">
-      <input type="password" id="gemini-key-input" class="glass-input" placeholder="AIzaSy... или sk-or-..." spellcheck="false" autocomplete="off" />
-      <button class="btn btn-solid btn-sm" id="btn-save-gemini-key" type="button">Сохранить</button>
+      <!-- 7. QUIZ -->
+      <div class="reader-pane reader-pane-quiz">
+        <div class="pane-header">
+          <span>🎯 Экспресс-квиз по материалам конспекта</span>
+          <span class="mono-tag">ТЕСТИРОВАНИЕ</span>
+        </div>
+        <div class="pane-content" style="padding: 24px;" id="reader-quiz-container"></div>
+      </div>
     </div>
-    <div class="key-hint">Если ключ не указан, работает автономный методический движок на базе локальных весов.</div>
-  </div>
-  <div class="hud-scrim" id="hud-scrim"></div>
-
-  <!-- Toast -->
-  <div class="copy-toast" id="copy-toast" role="status" aria-live="polite"></div>
+  </section>
 
   <!-- KaTeX JavaScript CDN -->
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" crossorigin="anonymous"></script>
-  <!-- Application Client Core -->
+  <script src="js/engine.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
