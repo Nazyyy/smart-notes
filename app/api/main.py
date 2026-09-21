@@ -127,7 +127,23 @@ app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
 
 # Mount Web Frontend UI
 from pathlib import Path
+from starlette.responses import FileResponse
 web_path = (Path(__file__).resolve().parent.parent.parent / "web").resolve()
+
+@app.get("/", tags=["System Diagnostics"])
+async def root(request: Request):
+    """Serve SPA landing page to browsers, or API metadata to JSON clients."""
+    accept = request.headers.get("accept", "")
+    web_index = web_path / "index.html"
+    if "text/html" in accept and web_index.exists():
+        return FileResponse(str(web_index), media_type="text/html")
+    return {
+        "name": settings.PROJECT_NAME,
+        "version": settings.PROJECT_VERSION,
+        "docs_url": "/docs",
+        "api_v1": "/api/v1",
+    }
+
 if web_path.exists():
     app.mount("/", StaticFiles(directory=str(web_path), html=True), name="web")
 
