@@ -69,7 +69,7 @@ class TransformerHTREngine:
         self,
         model_path: Optional[Path] = None,
         device: Optional[str] = None,
-        batch_size: int = 8,
+        batch_size: int = 24,
     ) -> None:
         preferred_path = Path(model_path or settings.ML_TRANSFORMER_PATH)
         # Check if fine-tuned or line-level model exists, otherwise fallback to base model
@@ -88,7 +88,7 @@ class TransformerHTREngine:
         self.device = torch.device(
             device or ("cuda" if torch.cuda.is_available() and settings.ML_DEVICE == "cuda" else "cpu")
         )
-        self.batch_size = batch_size
+        self.batch_size = max(batch_size, getattr(settings, "ML_BATCH_SIZE", 24))
 
         logger.info("Initializing TransformerHTREngine from %s on %s...", self.model_path, self.device)
         try:
@@ -142,8 +142,8 @@ class TransformerHTREngine:
         vpp = np.sum(clean_crop > 0, axis=0)
 
         # Minimum gap length and side margins to qualify as genuine multi-column layout
-        min_gap = max(75, int(w * 0.12))
-        min_side_w = max(80, int(w * 0.12))
+        min_gap = max(80, int(w * 0.12))
+        min_side_w = max(70, int(w * 0.10))
 
         is_gap = vpp < 2
         split_xs: List[int] = []
@@ -161,14 +161,14 @@ class TransformerHTREngine:
                     ink_left = int(np.sum(clean_crop[:, :gap_start] > 0))
                     ink_right = int(np.sum(clean_crop[:, x:] > 0))
                     # Only split as column if BOTH sides are genuine substantial text blocks
-                    if (w - x) >= min_side_w and ink_left >= 200 and ink_right >= 200:
+                    if (w - x) >= min_side_w and ink_left >= 250 and ink_right >= 250:
                         split_xs.append((gap_start + x) // 2)
-                    elif ink_right < 60:
-                        # Right side is just empty paper margin, trim it!
+                    elif ink_right < 15:
+                        # Right side is truly empty paper dust, trim it safely
                         crop = crop[:, :gap_start]
                         break
-                    elif ink_left < 60:
-                        # Left side is empty paper margin, trim it!
+                    elif ink_left < 15:
+                        # Left side is truly empty paper dust, trim it safely
                         crop = crop[:, x:]
                         break
 

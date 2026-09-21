@@ -54,11 +54,12 @@ def suppress_pencil_underlines(rectified_bgr: Optional[np.ndarray], binary: np.n
         # Graphite pencil: low color saturation (gray/silver) and medium/dark brightness
         pencil_mask = (s < 32) & (v < 185) & (binary > 0)
         pencil_uint8 = (pencil_mask.astype(np.uint8)) * 255
-        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (18, 1))
+        # Only remove long unbroken underline strokes (>= 36px), preserving individual letters/numbers
+        h_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (36, 1))
         pencil_lines = cv2.morphologyEx(pencil_uint8, cv2.MORPH_OPEN, h_kernel)
         pencil_lines = cv2.dilate(pencil_lines, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 2)), iterations=1)
         clean = cv2.subtract(binary, pencil_lines)
-        if np.sum(clean > 0) >= 150:
+        if np.sum(clean > 0) >= 120:
             return clean
     except Exception:
         pass
@@ -285,8 +286,8 @@ def calculate_line_horizontal_bounds(
         if (binary_slice.shape[1] - c_last_e) <= 80 and gap_right >= 40 and (c_last_ink / max(1, total_valid_ink)) < 0.15:
             valid_clusters = valid_clusters[:-1]
 
-    x1 = max(0, valid_clusters[0][0] - 12)
-    x2 = min(binary_slice.shape[1], valid_clusters[-1][1] + 14)
+    x1 = max(0, valid_clusters[0][0] - 16)
+    x2 = min(binary_slice.shape[1], valid_clusters[-1][1] + 18)
     return x1, x2
 
 
@@ -335,8 +336,8 @@ def tighten_line_crop(crop: np.ndarray) -> Tuple[np.ndarray, int]:
         x1 = valid_clusters[0][0]
         x2 = valid_clusters[-1][1]
 
-    pad_left = max(0, x1 - 10)
-    pad_right = min(crop.shape[1], x2 + 12)
+    pad_left = max(0, x1 - 16)
+    pad_right = min(crop.shape[1], x2 + 18)
     return crop[:, pad_left:pad_right], pad_left
 
 
@@ -423,17 +424,17 @@ def segment_text_lines(
         seams = compute_line_seams(clean_image, merged_intervals)
 
         for line_idx, (y1, y2) in enumerate(merged_intervals):
-            # Drop top table / desk / border artifact (spans top 8% of page)
-            if y2 <= int(img_h * 0.08) and y1 <= int(img_h * 0.055):
+            # Drop top table / desk / border artifact only if right at the outer edge with no text
+            if y2 <= int(img_h * 0.035) and y1 <= 4:
                 continue
-            # Drop bottom table border/shadow artifact (spans bottom 8% of page with huge width)
-            if y2 >= img_h - 10 and y1 >= img_h - 80:
+            # Drop bottom table border/shadow artifact only if at the extreme bottom edge
+            if y2 >= img_h - 6 and y1 >= img_h - 40:
                 continue
 
 
             h_line = y2 - y1
             # Add adaptive vertical padding so ascenders and descenders aren't clipped
-            pad = max(padding, int(h_line * 0.12))
+            pad = max(padding, int(h_line * 0.14))
             pad_y1 = max(0, y1 - pad)
             pad_y2 = min(img_h, y2 + pad)
 
@@ -446,7 +447,7 @@ def segment_text_lines(
             w = pad_x2 - pad_x1
             h = pad_y2 - pad_y1
 
-            if w <= 24 or h <= 12:
+            if w <= 20 or h <= 10:
                 continue
 
             top_seam = seams[line_idx - 1] if line_idx > 0 and len(seams) >= line_idx else None
@@ -464,17 +465,12 @@ def segment_text_lines(
             final_h = straight_crop.shape[0]
             final_x = pad_x1 + dx
 
-            # Filter out isolated tiny debris/dust specks (< 50px width or negligible ink)
-            if final_w < 50 or final_h < 12:
+            # Filter out true noise specks (< 24px width or < 8px height)
+            if final_w < 24 or final_h < 8:
                 continue
-
-            # Filter out tiny margin spillover / neighbor page ruling fragments
-            if final_w < 130 and (final_x <= 40 or (final_x + final_w) >= img_w - 40):
-                continue
-
 
             crop_clean = suppress_grid_lines(binary_image[pad_y1:pad_y2, final_x:final_x + final_w])
-            if int(np.sum(crop_clean > 0)) < 90:
+            if int(np.sum(crop_clean > 0)) < 35:
                 continue
 
             from app.cv.enhancer import suppress_notebook_grid_and_ruled_lines, pad_line_crop

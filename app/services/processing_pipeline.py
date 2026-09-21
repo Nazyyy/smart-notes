@@ -165,7 +165,7 @@ class DocumentProcessingPipeline:
                 predictions = await asyncio.to_thread(
                     self.inference_engine.predict_batch,
                     crops,
-                    (beam_width > 1),
+                    (beam_width > 3),
                 )
                 for raw_text, raw_conf in predictions:
                     cal_conf = calibrate_line_confidence(raw_text, raw_conf)

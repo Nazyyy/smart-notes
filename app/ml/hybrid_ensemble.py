@@ -199,20 +199,58 @@ class HybridEnsembleEngine:
         use_beam_search: bool = True,
     ) -> List[Tuple[str, float]]:
         """
-        Run sequential hybrid ensemble inference across a page's line crops,
-        propagating cross-line linguistic context.
+        Run high-throughput parallel hybrid ensemble inference:
+        1. Executes parallel TrOCR tensor inference across all page crops in sub-second time.
+        2. Applies Russian vocabulary and syntax binding.
+        3. Only for rare low-confidence or looping lines (conf < 0.62), performs targeted fast arbitration.
         """
         if not images:
             return []
 
-        results: List[Tuple[str, float]] = []
-        last_text: Optional[str] = None
         total = len(images)
+        results: List[Tuple[str, float]] = []
 
+        if self.transformer is not None:
+            try:
+                # Fast GPU parallel batch inference (greedy decode for sub-second page throughput)
+                fast_preds = self.transformer.predict_batch(images, use_beam_search=False)
+                last_text: Optional[str] = None
+
+                for idx, (crop, (t_text, t_conf)) in enumerate(zip(images, fast_preds)):
+                    is_clean = (
+                        t_conf >= 0.62
+                        and bool(t_text.strip())
+                        and not self.arbitrator.has_repetitive_loop(t_text)
+                    )
+                    if is_clean:
+                        final_text = self.binder.correct_line_vocabulary(t_text)
+                        final_conf = t_conf
+                    else:
+                        final_text, final_conf = self.predict_single_line(
+                            crop,
+                            enable_tta=False,
+                            context_prev_line=last_text,
+                        )
+
+                    if final_text and final_text.strip():
+                        last_text = final_text.strip()
+                    results.append((final_text, final_conf))
+                    logger.info(
+                        "Batch line %d/%d (%.1f%%): %s",
+                        idx + 1,
+                        total,
+                        final_conf * 100,
+                        (final_text[:45] + "...") if len(final_text) > 45 else final_text,
+                    )
+                return results
+            except Exception as exc:
+                logger.warning("Parallel batch inference failed, falling back to sequential: %s", exc)
+
+        last_text = None
         for idx, crop in enumerate(images):
             text, conf = self.predict_single_line(
                 crop,
-                enable_tta=True,
+                enable_tta=False,
                 context_prev_line=last_text,
             )
             if text and text.strip():

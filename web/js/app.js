@@ -1285,6 +1285,13 @@
     var hudScrim = $("#hud-scrim");
     if (hudScrim) hudScrim.addEventListener("click", closeHuds);
 
+    window.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        setMenu(false);
+        closeHuds();
+      }
+    });
+
     ["#btn-open-library", "#btn-hero-library"].forEach(function (sel) {
       var el = $(sel);
       if (el) el.addEventListener("click", function () {
