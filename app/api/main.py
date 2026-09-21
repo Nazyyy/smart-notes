@@ -122,19 +122,15 @@ async def health_check() -> dict:
     }
 
 
-@app.get("/", tags=["System Diagnostics"])
-async def root() -> dict:
-    """Welcome endpoint with API documentation references."""
-    return {
-        "message": "Добро пожаловать в систему «Умный конспект» API",
-        "docs_url": "/docs",
-        "redoc_url": "/redoc",
-        "api_v1": settings.API_V1_PREFIX,
-    }
-
-
 # Mount API V1 Master Router
 app.include_router(api_v1_router, prefix=settings.API_V1_PREFIX)
+
+# Mount Web Frontend UI
+from pathlib import Path
+web_path = (Path(__file__).resolve().parent.parent.parent / "web").resolve()
+if web_path.exists():
+    app.mount("/", StaticFiles(directory=str(web_path), html=True), name="web")
+
 
 
 if __name__ == "__main__":
